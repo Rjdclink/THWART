@@ -1,4 +1,4 @@
-# Transferred T.H.W.A.R.T. files (77)
+# Transferred T.H.W.A.R.T. files (78)
 
 - `archive/admin/cryptocrawler-admin-polling.ts`
 - `archive/admin/cryptocrawler-admin-types.ts`
@@ -27,6 +27,7 @@
 - `docs/cryptocrawl/scan-liveness-repair-evidence.md`
 - `docs/CRYPTOCRAWLER_KALSHI_RUNBOOK.md`
 - `docs/CRYPTOCRAWLER_STAGED_GOVERNANCE.md`
+- `docs/cryptocrawler-orchestrator-api-separation.patch`
 - `docs/cryptocrawler/BPS_FEE_RECOVERY_COMPLETION_20260905.md`
 - `docs/extracted-cryptara-genie-lanes.md`
 - `docs/extracted-cryptocrawler-bootstrap.md`
