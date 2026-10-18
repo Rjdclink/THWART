@@ -1,0 +1,111 @@
+--- original
++++ separated
+@@ -20,5 +20,5 @@
+   'reasoning', 'coding', 'legal-analysis', 'creative-writing', 'data-extraction',
+   'pattern-recognition', 'visual-analysis', 'long-context', 'fast-inference',
+-  'research', 'trading-analysis', 'market-prediction', 'blockchain-interaction',
++  'research',
+   'document-generation', 'verification', 'orchestration',
+ ]);
+@@ -109,6 +109,6 @@
+     const { domain, type, prompt, systemPrompt, capabilities, priority, maxTokens, temperature, metadata } = req.body ?? {};
+ 
+-    if (domain !== 'legal' && domain !== 'crypto') {
+-      return res.status(400).json({ success: false, error: 'domain must be "legal" or "crypto"' });
++    if (domain !== 'legal') {
++      return res.status(400).json({ success: false, error: 'domain must be "legal"' });
+     }
+     if (typeof type !== 'string' || !type.trim() || typeof prompt !== 'string' || !prompt.trim()) {
+@@ -127,5 +127,5 @@
+     const task: OrchestratedTask = {
+       id: `api-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+-      domain: domain === 'legal' ? Domain.LEGAL_WHAT : Domain.CRYPTO_CRAWLER,
++      domain: Domain.LEGAL_WHAT,
+       type: type.trim(),
+       prompt: prompt.trim(),
+@@ -164,4 +164,7 @@
+       return res.status(404).json({ success: false, error: 'Sub-agent not found' });
+     }
++    if (agent.domain === Domain.CRYPTO_CRAWLER) {
++      return res.status(403).json({ success: false, error: 'Trading agents are managed separately' });
++    }
+ 
+     const normalizedPriority = typeof priority === 'number' ? Math.max(1, Math.min(Math.floor(priority), 10)) : 5;
+@@ -213,11 +216,11 @@
+     const { domain } = req.body;
+     
+-    if (!domain || !['legal', 'crypto', 'both'].includes(domain)) {
+-      return res.status(400).json({ 
+-        success: false, 
+-        error: 'Invalid domain. Must be "legal", "crypto", or "both"' 
+-      });
+-    }
+-    
++    if (domain !== 'legal') {
++      return res.status(400).json({
++        success: false,
++        error: 'Invalid domain. Must be "legal"'
++      });
++    }
++
+     const status = ForgeAI.getStatus();
+     if (!status.isRunning) {
+@@ -230,10 +233,5 @@
+     log.info(`Triggering evolution for domain: ${domain}`);
+     
+-    if (domain === 'legal' || domain === 'both') {
+-      await ForgeAI.triggerEvolution(Domain.LEGAL_WHAT);
+-    }
+-    if (domain === 'crypto' || domain === 'both') {
+-      await ForgeAI.triggerEvolution(Domain.CRYPTO_CRAWLER);
+-    }
++    await ForgeAI.triggerEvolution(Domain.LEGAL_WHAT);
+     
+     lastEvolutionRun = new Date();
+@@ -264,8 +262,4 @@
+           workerFunctions: status.legalwhatStats.workerFunctions,
+         },
+-        cryptocrawler: {
+-          activeSubAgents: status.cryptocrawlerStats.activeSubAgents,
+-          workerFunctions: status.cryptocrawlerStats.workerFunctions,
+-        },
+       },
+     });
+@@ -281,16 +275,15 @@
+     const { domain } = req.params;
+     
+-    if (!['legal', 'crypto'].includes(domain)) {
+-      return res.status(400).json({ 
+-        success: false, 
+-        error: 'Invalid domain. Must be "legal" or "crypto"' 
+-      });
+-    }
+-    
+-    const domainEnum = domain === 'legal' ? Domain.LEGAL_WHAT : Domain.CRYPTO_CRAWLER;
+-    const stats = DomainFirewall.getDomainStats(domainEnum);
+-    const status = ForgeAI.getStatus();
+-    const domainStats = domain === 'legal' ? status.legalwhatStats : status.cryptocrawlerStats;
+-    
++    if (domain !== 'legal') {
++      return res.status(400).json({
++        success: false,
++        error: 'Invalid domain. Must be "legal"'
++      });
++    }
++
++    const stats = DomainFirewall.getDomainStats(Domain.LEGAL_WHAT);
++    const status = ForgeAI.getStatus();
++    const domainStats = status.legalwhatStats;
++
+     res.json({
+       success: true,
+@@ -353,9 +346,4 @@
+           subAgents: status.legalwhatStats.activeSubAgents,
+         },
+-        crypto: {
+-          operations: status.cryptocrawlerStats.operations,
+-          errors: status.cryptocrawlerStats.errors,
+-          subAgents: status.cryptocrawlerStats.activeSubAgents,
+-        },
+       },
+       recommendations: [] as string[],
