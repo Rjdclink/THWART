@@ -50,4 +50,4 @@ These findings are based on file content inspection, reverse-import and exact-pa
 
 ## Transfer status
 
-These six newly confirmed independent files have **not been moved or deleted** as part of this classification-only review. The pre-existing transfer manifest remains at 43 files; the production and development branches are unchanged. Do not merge or deploy based on this report.
+The six independent files identified above were subsequently copied into THWART and their contents verified twice. All 49 transferred files were then removed from Bad-Blue's `develop` branch in commit `8bae7c0d7bd106f89a1b93242ff9410f98302ff9`. The Railway production release branch remains unchanged; no merge or deployment was performed.
