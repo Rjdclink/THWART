@@ -1,8 +1,10 @@
-# Transferred T.H.W.A.R.T. files (43)
+# Transferred T.H.W.A.R.T. files (49)
 
+- `contracts/cryptocrawl/README.md`
 - `CRYPTOCRAWL_IMPLEMENTATION_SUMMARY.md`
 - `db/migrations/0018_add_crypto_wallet_tables.sql`
 - `db/migrations/0022_cryptocrawl_flashbots_auth_identity.sql`
+- `docs/ARBITRAGE_AGENTS_VERIFICATION.md`
 - `docs/ARIES_EDGE_FORMATION_REACTOR.md`
 - `docs/cryptocrawl/bps-reduction-repair-evidence.md`
 - `docs/cryptocrawl/scan-liveness-repair-evidence.md`
@@ -23,7 +25,11 @@
 - `server/services/cryptocrawl/PR5_IMPLEMENTATION.md`
 - `server/services/cryptocrawl/README.md`
 - `server/services/cryptocrawl/scanners/elite-arbitrage-scanner.ts`
+- `server/services/cryptocrawl/scanners/IMPLEMENTATION_SUMMARY.md`
 - `server/services/cryptocrawl/scanners/README.md`
+- `server/services/cryptocrawl/scanners/SECURITY_SUMMARY.md`
+- `server/services/cryptocrawl/SECURITY_SUMMARY.md`
+- `server/services/cryptocrawl/stealth/circuit-breaker.ts`
 - `server/services/cryptocrawl/stealth/config.ts`
 - `server/services/cryptocrawl/stealth/index.ts`
 - `server/services/cryptocrawl/stealth/PERFECTION_SUMMARY.md`
