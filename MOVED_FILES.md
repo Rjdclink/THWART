@@ -1,5 +1,6 @@
-# Transferred T.H.W.A.R.T. files (49)
+# Transferred T.H.W.A.R.T. files (50)
 
+- `client/src/components/cryptocrawler-master-panel.ts`
 - `contracts/cryptocrawl/README.md`
 - `CRYPTOCRAWL_IMPLEMENTATION_SUMMARY.md`
 - `db/migrations/0018_add_crypto_wallet_tables.sql`
