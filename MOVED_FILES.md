@@ -1,4 +1,4 @@
-# Transferred T.H.W.A.R.T. files (79)
+# Transferred T.H.W.A.R.T. files (80)
 
 - `archive/admin/cryptocrawler-admin-polling.ts`
 - `archive/admin/cryptocrawler-admin-types.ts`
@@ -44,6 +44,7 @@
 - `server/services/cryptocrawl/execution/maker-taker-policy.ts`
 - `server/services/cryptocrawl/governance/OPERATIONAL_RUNBOOK.md`
 - `server/services/cryptocrawl/governance/README.md`
+- `server/services/cryptocrawl/integration/lexara-crypto-observational-crawlers.ts`
 - `server/services/cryptocrawl/legacy-graceful-shutdown.ts`
 - `server/services/cryptocrawl/mev/flashbots-engine.ts`
 - `server/services/cryptocrawl/mev/index.ts`
