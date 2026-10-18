@@ -1,4 +1,4 @@
-# Transferred T.H.W.A.R.T. files (74)
+# Transferred T.H.W.A.R.T. files (75)
 
 - `archive/admin/cryptocrawler-admin-polling.ts`
 - `archive/admin/cryptocrawler-admin-types.ts`
@@ -28,6 +28,7 @@
 - `docs/CRYPTOCRAWLER_KALSHI_RUNBOOK.md`
 - `docs/CRYPTOCRAWLER_STAGED_GOVERNANCE.md`
 - `docs/cryptocrawler/BPS_FEE_RECOVERY_COMPLETION_20260905.md`
+- `docs/extracted-cryptocrawler-bootstrap.md`
 - `scripts/cryptocrawl/verify-maker-taker-policy.ts`
 - `server/routes/arbitrageAgents.routes.ts`
 - `server/routes/cryptoWiring.routes.ts`
