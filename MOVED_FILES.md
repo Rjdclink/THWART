@@ -1,4 +1,4 @@
-# Transferred T.H.W.A.R.T. files (80)
+# Transferred T.H.W.A.R.T. files (83)
 
 - `archive/admin/cryptocrawler-admin-polling.ts`
 - `archive/admin/cryptocrawler-admin-types.ts`
@@ -32,7 +32,10 @@
 - `docs/cryptocrawler/BPS_FEE_RECOVERY_COMPLETION_20260905.md`
 - `docs/extracted-cryptara-genie-lanes.md`
 - `docs/extracted-cryptocrawler-bootstrap.md`
+- `scripts/cryptocrawl/build-server-overflow-authority.mjs`
+- `scripts/cryptocrawl/Dockerfile.trading-build.fragment`
 - `scripts/cryptocrawl/verify-maker-taker-policy.ts`
+- `scripts/cryptocrawl/vite-monte-carlo-worker-build.ts`
 - `server/routes/arbitrageAgents.routes.ts`
 - `server/routes/cryptocrawl-faucet.health.ts`
 - `server/routes/cryptoWiring.routes.ts`
