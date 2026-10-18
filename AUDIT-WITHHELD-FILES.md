@@ -3,14 +3,14 @@
 Scope: 1,180 named trading-related files; 43 previously copied to THWART; 1,137 still in Bad-Blue.
 The 43 transferred files are recorded in [MOVED_FILES.md](MOVED_FILES.md).
 
-Of the 1,137 remaining, 1,100 have a source graph link to retained code or configuration. The other 37 are not confirmed safe for deletion.
+Of the 1,137 remaining, 1,100 have a source graph link to retained code or configuration. The final individual review found 6 more independent candidates and 31 that must remain. See [INDEPENDENCE_REVIEW_37.md](INDEPENDENCE_REVIEW_37.md).
 Source: develop at 55118555621959f445815dfb987f4e32bd552db8 and production at 666ce49bcccd8352cb4bb11f97073e719e10b2de.
 Review considered imports, reverse callers, dynamic file access, build and verification wiring, and source content comparisons. This is a static audit, not a full production build certification.
 
 ## Numbered files still retained
 
-1. `.github/workflows/cryptocrawler-test.yml` — REQUIRES REVIEW: GitHub workflow belongs to existing repository
-2. `CRYPTOCRAWL_OPTIONAL_AUTH.md` — REQUIRES REVIEW: document links and ownership need review
+1. `.github/workflows/cryptocrawler-test.yml` — NOT INDEPENDENT / RETAIN: GitHub workflow runs Bad-Blue's CryptoCrawler tests on pushes and PRs; moving it changes existing repository verification.
+2. `CRYPTOCRAWL_OPTIONAL_AUTH.md` — NOT INDEPENDENT / RETAIN: Referenced by VERIFICATION_COMPLETE.md. Removing it leaves an existing documentation reference unresolved.
 3. `artifacts/cryptocrawl/CryptocrawlBalancerFlashLoanReceiver.json` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 4. `artifacts/cryptocrawl/CryptocrawlSushiV3FlashReceiver.json` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 5. `client/src/hooks/useWallet.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
@@ -26,10 +26,10 @@ Review considered imports, reverse callers, dynamic file access, build and verif
 15. `contracts/cryptocrawl/CryptocrawlGhostWalletUniswapXFiller.sol` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 16. `contracts/cryptocrawl/CryptocrawlMorphoFlashLoanReceiver.sol` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 17. `contracts/cryptocrawl/CryptocrawlSushiV3FlashReceiver.sol` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
-18. `contracts/cryptocrawl/README.md` — REQUIRES REVIEW: document links and ownership need review
-19. `docs/ARBITRAGE_AGENTS_VERIFICATION.md` — REQUIRES REVIEW: document links and ownership need review
-20. `docs/LEXARA_LEGAL_MESH.md` — REQUIRES REVIEW: LegalWhat-domain or mixed-domain material
-21. `docs/cryptocrawl/bps-expanded-audit-2026-10-13.md` — REQUIRES REVIEW: document links and ownership need review
+18. `contracts/cryptocrawl/README.md` — INDEPENDENT (NOT YET MOVED): Crypto-only deployment instructions; no incoming application imports, build reads, or exact backlinks were found. Documentation only; contracts may be relocated later.
+19. `docs/ARBITRAGE_AGENTS_VERIFICATION.md` — INDEPENDENT (NOT YET MOVED): Crypto-arbitrage verification guide; no LegalWhat content or incoming code/document dependency was found. Documentation only.
+20. `docs/LEXARA_LEGAL_MESH.md` — NOT INDEPENDENT / RETAIN: Explains LEXARA, LegalWhat, and Pantheon legal-provider routing; clearly LegalWhat-owned documentation.
+21. `docs/cryptocrawl/bps-expanded-audit-2026-10-13.md` — NOT INDEPENDENT / RETAIN: Contains LEXARA and Spectra deployment history alongside CryptoCrawler analysis; mixed-domain document.
 22. `docs/cryptocrawler/PROGRESS_CONSOLIDATION_20260905.md` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 23. `scripts/cryptocrawl/build-server-overflow-authority.mjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 24. `scripts/cryptocrawl/compile-flashloan-receiver.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
@@ -39,7 +39,7 @@ Review considered imports, reverse callers, dynamic file access, build and verif
 28. `scripts/cryptocrawl/deploy-dual-flashloan-receiver.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 29. `scripts/cryptocrawl/deploy-flashloan-receiver.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 30. `scripts/cryptocrawl/lib/pr482-canonical-contract.cjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
-31. `scripts/cryptocrawl/nix-gen-research-map.txt` — REQUIRES REVIEW: verification or research file relies on other retained modules
+31. `scripts/cryptocrawl/nix-gen-research-map.txt` — NOT INDEPENDENT / RETAIN: Specifically referenced by server/services/cryptocrawl/optimization/nix-gen/README.md, which remains in Bad-Blue.
 32. `scripts/cryptocrawl/validate-zero-capital-layer.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 33. `scripts/cryptocrawl/verify-300-profitability-live-execution-controls.cjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 34. `scripts/cryptocrawl/verify-aave-balancer-provider-mesh.cjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
@@ -66,7 +66,7 @@ Review considered imports, reverse callers, dynamic file access, build and verif
 55. `scripts/cryptocrawl/verify-bps-private-refund-wave4.cjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 56. `scripts/cryptocrawl/verify-bps-provider-feedback-wave5.cjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 57. `scripts/cryptocrawl/verify-bps-rebate-refund-truth.cjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
-58. `scripts/cryptocrawl/verify-bps-reduction-behavior.cjs` — REQUIRES REVIEW: verification or research file relies on other retained modules
+58. `scripts/cryptocrawl/verify-bps-reduction-behavior.cjs` — NOT INDEPENDENT / RETAIN: Invoked by the retained CryptoCrawler deployment-preflight verifier and loads retained trading source.
 59. `scripts/cryptocrawl/verify-bps-structural-repairs.cjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 60. `scripts/cryptocrawl/verify-bps-terminal-off.cjs` — DEPENDENT: connected group, external reference example: scripts/cryptocrawl/verify-bps-terminal-off.cjs -> client/src/components/bps-activity-terminal.tsx
 61. `scripts/cryptocrawl/verify-bps-zero-capital-event-handoff.cjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
@@ -84,7 +84,7 @@ Review considered imports, reverse callers, dynamic file access, build and verif
 73. `scripts/cryptocrawl/verify-cex-private-authority.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 74. `scripts/cryptocrawl/verify-cex-product-aware-fee-routing.cjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 75. `scripts/cryptocrawl/verify-cex-websocket-rpi-modernization.cjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
-76. `scripts/cryptocrawl/verify-chain-fee-lifecycle-behavior.cjs` — REQUIRES REVIEW: verification or research file relies on other retained modules
+76. `scripts/cryptocrawl/verify-chain-fee-lifecycle-behavior.cjs` — NOT INDEPENDENT / RETAIN: Invoked by the retained deployment-preflight verifier and reads retained trading modules.
 77. `scripts/cryptocrawl/verify-clean-house-authority-extensions.cjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 78. `scripts/cryptocrawl/verify-clean-house.cjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 79. `scripts/cryptocrawl/verify-coinbase-advanced-market-data.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
@@ -209,8 +209,8 @@ Review considered imports, reverse callers, dynamic file access, build and verif
 198. `scripts/cryptocrawl/verify-payout-recipient-truth.cjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 199. `scripts/cryptocrawl/verify-pending-stream-provider-failover.cjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 200. `scripts/cryptocrawl/verify-post-aries-runtime-recovery.cjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
-201. `scripts/cryptocrawl/verify-power-consistency-behavior.cjs` — REQUIRES REVIEW: verification or research file relies on other retained modules
-202. `scripts/cryptocrawl/verify-price-lifecycle-behavior.cjs` — REQUIRES REVIEW: verification or research file relies on other retained modules
+201. `scripts/cryptocrawl/verify-power-consistency-behavior.cjs` — NOT INDEPENDENT / RETAIN: Loads multiple retained CryptoCrawler admin/runtime sources and mocks the Pantheon integration; not a self-contained file.
+202. `scripts/cryptocrawl/verify-price-lifecycle-behavior.cjs` — NOT INDEPENDENT / RETAIN: Invoked by the retained deployment-preflight verifier and dynamically reads retained trading modules.
 203. `scripts/cryptocrawl/verify-product-discovery-coverage.cjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 204. `scripts/cryptocrawl/verify-production-pressure-evidence-repairs.cjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 205. `scripts/cryptocrawl/verify-profit-blocker-wiring.cjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
@@ -237,7 +237,7 @@ Review considered imports, reverse callers, dynamic file access, build and verif
 226. `scripts/cryptocrawl/verify-runtime-initialization-efficiency.cjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 227. `scripts/cryptocrawl/verify-runtime-readiness-policy.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 228. `scripts/cryptocrawl/verify-runtime-safety-invariants.cjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
-229. `scripts/cryptocrawl/verify-scan-liveness-behavior.cjs` — REQUIRES REVIEW: verification or research file relies on other retained modules
+229. `scripts/cryptocrawl/verify-scan-liveness-behavior.cjs` — NOT INDEPENDENT / RETAIN: Invoked by the retained deployment-preflight verifier and dynamically reads trading code.
 230. `scripts/cryptocrawl/verify-self-funded-capital-authority.cjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 231. `scripts/cryptocrawl/verify-single-profit-admission-authority.cjs` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 232. `scripts/cryptocrawl/verify-skale-difficulty-resolution.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
@@ -351,23 +351,23 @@ Review considered imports, reverse callers, dynamic file access, build and verif
 340. `server/migrations/055_cryptocrawler_coinbase_system_owned_capital.sql` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 341. `server/migrations/057_cryptocrawler_ghost_wallet_runtime.sql` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 342. `server/migrations/058_cryptocrawler_ghost_wallet_gas_reserve.sql` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
-343. `server/migrations/058_cryptocrawler_self_funded_cex_bootstrap.sql` — REQUIRES REVIEW: active migration runner dynamically loads SQL files
+343. `server/migrations/058_cryptocrawler_self_funded_cex_bootstrap.sql` — NOT INDEPENDENT / RETAIN: The application's migrations runner enumerates all SQL files inside server/migrations; removal alters its supported schema migration set.
 344. `server/migrations/059_cryptocrawler_zero_capital_rescue_fairness.sql` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
-345. `server/migrations/060_cryptocrawler_cex_inventory_transform.sql` — REQUIRES REVIEW: active migration runner dynamically loads SQL files
+345. `server/migrations/060_cryptocrawler_cex_inventory_transform.sql` — NOT INDEPENDENT / RETAIN: The application's migrations runner enumerates all SQL files inside server/migrations; removal alters its schema migration set.
 346. `server/migrations/createCryptocrawlFlashbotsAuthIdentityTable.ts` — DEPENDENT: connected group, external reference example: server/migrations/createCryptocrawlFlashbotsAuthIdentityTable.ts -> server/db.ts
-347. `server/migrations/cryptocrawler-testing-tables.sql` — REQUIRES REVIEW: active migration runner dynamically loads SQL files
+347. `server/migrations/cryptocrawler-testing-tables.sql` — NOT INDEPENDENT / RETAIN: The application's migrations runner enumerates all SQL files inside server/migrations, including this testing schema.
 348. `server/migrations/overflow/001_cryptara_comp_cache.sql` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 349. `server/migrations/overflow/002_cryptara_parallel_proxy.sql` — DEPENDENT: connected group, external reference example: Dockerfile -> server/migrations/overflow/002_cryptara_parallel_proxy.sql
 350. `server/migrations/overflow/003_cryptocrawler_runtime_prerequisites.sql` — DEPENDENT: connected group, external reference example: Dockerfile -> server/migrations/overflow/003_cryptocrawler_runtime_prerequisites.sql
 351. `server/migrations/overflow/004_cryptocrawler_terminal_support.sql` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 352. `server/migrations/removeCryptocrawlFlashbotsAuthIdentityTable.ts` — DEPENDENT: connected group, external reference example: server/migrations/removeCryptocrawlFlashbotsAuthIdentityTable.ts -> server/db.ts
 353. `server/reactor/computationalReactor.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
-354. `server/reactor/fusion/index.ts` — REQUIRES REVIEW: shared model and legal-domain reactor
-355. `server/reactor/fusion/monte_carlo_adapter.ts` — REQUIRES REVIEW: shared model and legal-domain reactor
-356. `server/reactor/fusion/neural_fusion_engine.ts` — REQUIRES REVIEW: shared model and legal-domain reactor
+354. `server/reactor/fusion/index.ts` — NOT INDEPENDENT / RETAIN: Exports the shared fusion/Monte Carlo adapter, including legal research evaluation, rather than a CryptoCrawler-only module.
+355. `server/reactor/fusion/monte_carlo_adapter.ts` — NOT INDEPENDENT / RETAIN: Implements legal-research citation evaluation and OSINT analysis as well as other Monte Carlo functions.
+356. `server/reactor/fusion/neural_fusion_engine.ts` — NOT INDEPENDENT / RETAIN: Contains scoring for the legal and OSINT domains; not exclusively CryptoCrawler code.
 357. `server/reactor/index.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
-358. `server/reactor/metrics/index.ts` — REQUIRES REVIEW: shared model and legal-domain reactor
-359. `server/reactor/metrics/rate_limit_monitor.ts` — REQUIRES REVIEW: shared model and legal-domain reactor
+358. `server/reactor/metrics/index.ts` — NOT INDEPENDENT / RETAIN: Exports a shared AI-provider rate-limit monitor, not a CryptoCrawler-specific feature.
+359. `server/reactor/metrics/rate_limit_monitor.ts` — NOT INDEPENDENT / RETAIN: Monitors generic AI-provider quotas, tokens, and costs; cannot be assigned exclusively to THWART.
 360. `server/reactor/routing/index.ts` — DEPENDENT: connected group, external reference example: server/reactor/routing/model_router.ts -> server/db.ts
 361. `server/reactor/routing/model_router.ts` — DEPENDENT: connected group, external reference example: server/reactor/routing/model_router.ts -> server/db.ts
 362. `server/reactor/routing/redundancy_manager.ts` — DEPENDENT: connected group, external reference example: server/reactor/routing/model_router.ts -> server/db.ts
@@ -375,9 +375,9 @@ Review considered imports, reverse callers, dynamic file access, build and verif
 364. `server/routes/arbitrageAgents.routes.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 365. `server/routes/monteCarlo.routes.ts` — DEPENDENT: connected group, external reference example: scripts/verify-monte-carlo-evolution.cjs -> MONTE_CARLO_CRAWLER_CONFIG.md
 366. `server/routes/reactor.routes.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
-367. `server/services/computationalBeam/ADVANCED_ENHANCEMENT_STRATEGY.md` — REQUIRES REVIEW: shared Beam infrastructure and documentation
-368. `server/services/computationalBeam/HYPER_OPTIMIZATION_STRATEGY.md` — REQUIRES REVIEW: shared Beam infrastructure and documentation
-369. `server/services/computationalBeam/README.md` — REQUIRES REVIEW: shared Beam infrastructure and documentation
+367. `server/services/computationalBeam/ADVANCED_ENHANCEMENT_STRATEGY.md` — NOT INDEPENDENT / RETAIN: Linked from the shared computationalBeam README; moving it would break that repository reference.
+368. `server/services/computationalBeam/HYPER_OPTIMIZATION_STRATEGY.md` — NOT INDEPENDENT / RETAIN: Describes optimization of shared computational Beam infrastructure rather than a trading-only component.
+369. `server/services/computationalBeam/README.md` — NOT INDEPENDENT / RETAIN: Documents both CryptoCrawler and Pantheon integration; the retained Beam validator also reads this README.
 370. `server/services/computationalBeam/arbitrageOptimizer.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 371. `server/services/computationalBeam/comprehensive-validate.ts` — DEPENDENT: connected group, external reference example: server/services/computationalBeam/comprehensive-validate.ts -> server/services/computationalBeam/main.ts
 372. `server/services/computationalBeam/credentialValidator.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
@@ -411,8 +411,8 @@ Review considered imports, reverse callers, dynamic file access, build and verif
 400. `server/services/cryptara/opportunity-ml-ranker.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 401. `server/services/cryptara/zero-capital-funding-learning.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 402. `server/services/cryptocrawl/CANONICAL_AUTHORITIES.md` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
-403. `server/services/cryptocrawl/HYPER_EVOLVING_SWARM.md` — REQUIRES REVIEW: document links and ownership need review
-404. `server/services/cryptocrawl/SECURITY_SUMMARY.md` — REQUIRES REVIEW: document links and ownership need review
+403. `server/services/cryptocrawl/HYPER_EVOLVING_SWARM.md` — NOT INDEPENDENT / RETAIN: References CANONICAL_AUTHORITIES.md retained in Bad-Blue and is mentioned by retained swarm documentation.
+404. `server/services/cryptocrawl/SECURITY_SUMMARY.md` — INDEPENDENT (NOT YET MOVED): Archived trading-crawler security documentation; no direct application imports, exact backlinks, or LegalWhat-specific content were found.
 405. `server/services/cryptocrawl/agents/cain-crawler.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 406. `server/services/cryptocrawl/agents/cain-twin-hybrid.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 407. `server/services/cryptocrawl/agents/conjoined-twin-crawler.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
@@ -470,7 +470,7 @@ Review considered imports, reverse callers, dynamic file access, build and verif
 459. `server/services/cryptocrawl/capital-free/provider-mesh-pending-stream.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 460. `server/services/cryptocrawl/capital-free/starburst-scaling.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 461. `server/services/cryptocrawl/capital-free/superchain-integration.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
-462. `server/services/cryptocrawl/compensation/README.md` — REQUIRES REVIEW: document links and ownership need review
+462. `server/services/cryptocrawl/compensation/README.md` — NOT INDEPENDENT / RETAIN: Contains LegalWhat context and is referenced by the retained compensation-enhancement documentation.
 463. `server/services/cryptocrawl/compensation/compensationEngine.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/compensation/compensationEngine.ts -> server/logger.ts
 464. `server/services/cryptocrawl/compensation/compensationGuarantee.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/compensation/compensationEngine.ts -> server/logger.ts
 465. `server/services/cryptocrawl/compensation/demo.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/compensation/compensationEngine.ts -> server/logger.ts
@@ -759,7 +759,7 @@ Review considered imports, reverse callers, dynamic file access, build and verif
 748. `server/services/cryptocrawl/ghost-wallet/onchain-capital-sources.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 749. `server/services/cryptocrawl/ghost-wallet/profit-funded-native-payout.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 750. `server/services/cryptocrawl/ghost-wallet/zero-capital-alternative-selection-registry.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
-751. `server/services/cryptocrawl/governance/DEPLOYMENT_GUIDE.md` — REQUIRES REVIEW: document links and ownership need review
+751. `server/services/cryptocrawl/governance/DEPLOYMENT_GUIDE.md` — NOT INDEPENDENT / RETAIN: Describes retained governance source, stage management, and deployment procedures; not a self-contained archive.
 752. `server/services/cryptocrawl/governance/adaptive-profit-operating-envelope.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 753. `server/services/cryptocrawl/governance/arbitrage-agents.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 754. `server/services/cryptocrawl/governance/atomic-zero-capital-strategy-coverage.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
@@ -803,7 +803,7 @@ Review considered imports, reverse callers, dynamic file access, build and verif
 792. `server/services/cryptocrawl/integration/ape-profitable-snapshot-lease.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 793. `server/services/cryptocrawl/integration/ape-rescue-orchestration.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 794. `server/services/cryptocrawl/integration/ape-resident-workbench.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
-795. `server/services/cryptocrawl/integration/atomic-bps-anytime-race.ts` — REQUIRES REVIEW: runtime independence remains unverified
+795. `server/services/cryptocrawl/integration/atomic-bps-anytime-race.ts` — NOT INDEPENDENT / RETAIN: Loaded directly by scripts/cryptocrawl/verify-bps-reduction-behavior.cjs, itself called by deployment-preflight verification.
 796. `server/services/cryptocrawl/integration/atomic-profitability-resident-routing.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 797. `server/services/cryptocrawl/integration/authenticated-fee-tier-optimization-wiring.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 798. `server/services/cryptocrawl/integration/authoritative-monte-carlo-wiring.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
@@ -1061,10 +1061,10 @@ Review considered imports, reverse callers, dynamic file access, build and verif
 1050. `server/services/cryptocrawl/scaling/dynamic-scale-pressure-wiring.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 1051. `server/services/cryptocrawl/scaling/dynamic-scale-profile-policy.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 1052. `server/services/cryptocrawl/scanner/realtime-stream.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
-1053. `server/services/cryptocrawl/scanners/IMPLEMENTATION_SUMMARY.md` — REQUIRES REVIEW: document links and ownership need review
-1054. `server/services/cryptocrawl/scanners/SECURITY_SUMMARY.md` — REQUIRES REVIEW: document links and ownership need review
+1053. `server/services/cryptocrawl/scanners/IMPLEMENTATION_SUMMARY.md` — INDEPENDENT (NOT YET MOVED): Scanner-only documentation, with no incoming application references; its elite-arbitrage-scanner.ts source is already preserved in THWART.
+1054. `server/services/cryptocrawl/scanners/SECURITY_SUMMARY.md` — INDEPENDENT (NOT YET MOVED): Scanner-only security notes with no exact external backlink or LegalWhat imports; underlying scanner source is already in THWART.
 1055. `server/services/cryptocrawl/stealth/async-mutex.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
-1056. `server/services/cryptocrawl/stealth/circuit-breaker.ts` — REQUIRES REVIEW: runtime independence remains unverified
+1056. `server/services/cryptocrawl/stealth/circuit-breaker.ts` — INDEPENDENT (NOT YET MOVED): Standalone exported class with no imports or actual file-specific callers; TypeScript transpilation reported zero errors.
 1057. `server/services/cryptocrawl/stealth/continuous-learning-system.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 1058. `server/services/cryptocrawl/stealth/dynamic-scale-physics.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 1059. `server/services/cryptocrawl/stealth/operational-integrity.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
@@ -1097,9 +1097,9 @@ Review considered imports, reverse callers, dynamic file access, build and verif
 1086. `server/services/cryptocrawl/testing/verify-wallet-assets.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 1087. `server/services/cryptocrawl/training/index.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 1088. `server/services/cryptocrawl/training/scheduled-monte-carlo-training.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
-1089. `server/services/cryptocrawl/ui/README.md` — REQUIRES REVIEW: application serves this dashboard directory
-1090. `server/services/cryptocrawl/ui/dashboard-client.js` — REQUIRES REVIEW: application serves this dashboard directory
-1091. `server/services/cryptocrawl/ui/dashboard.html` — REQUIRES REVIEW: application serves this dashboard directory
+1089. `server/services/cryptocrawl/ui/README.md` — NOT INDEPENDENT / RETAIN: Describes assets from the UI directory served by the existing application and is referenced by dashboard documentation.
+1090. `server/services/cryptocrawl/ui/dashboard-client.js` — NOT INDEPENDENT / RETAIN: Loaded by dashboard.html and served by the existing application's static-file route.
+1091. `server/services/cryptocrawl/ui/dashboard.html` — NOT INDEPENDENT / RETAIN: Served by Bad-Blue's existing Express static mount; removing it changes the current dashboard.
 1092. `server/services/cryptocrawl/utils/resilient-http.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 1093. `server/services/cryptocrawl/validate-swarm.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 1094. `server/services/cryptocrawl/validation/index.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
@@ -1113,10 +1113,10 @@ Review considered imports, reverse callers, dynamic file access, build and verif
 1102. `server/services/cryptocrawl/validation/verify-hyper-quanti-admission.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 1103. `server/services/cryptocrawl/validation/verify-hyper-shared-data-fabric.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 1104. `server/services/cryptocrawl/verification/canonicalCryptoVerifier.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
-1105. `server/services/cryptocrawl/wallet/.wallet.enc.json` — REQUIRES REVIEW: wallet material requires restricted handling
-1106. `server/services/cryptocrawl/wallet/wallet-generator.ts` — REQUIRES REVIEW: wallet material requires restricted handling
+1105. `server/services/cryptocrawl/wallet/.wallet.enc.json` — NOT INDEPENDENT / RETAIN: Encrypted wallet data is referenced by the paired wallet generator; also inappropriate to publish to a public repository.
+1106. `server/services/cryptocrawl/wallet/wallet-generator.ts` — NOT INDEPENDENT / RETAIN: Reads/writes the wallet-data file and application environment configuration; not independent of the retained wallet setup.
 1107. `server/services/geoconsole/monteCarloPathEngine.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
-1108. `server/services/inmateSearch/__tests__/MonteCarloInmateTest.ts` — REQUIRES REVIEW: LegalWhat-domain or mixed-domain material
+1108. `server/services/inmateSearch/__tests__/MonteCarloInmateTest.ts` — NOT INDEPENDENT / RETAIN: Tests inmate and people search capabilities belonging to LegalWhat, not THWART.
 1109. `server/services/monteCarlo/EvolutionaryCycleEngine.ts` — DEPENDENT: connected group, external reference example: scripts/verify-monte-carlo-evolution.cjs -> MONTE_CARLO_CRAWLER_CONFIG.md
 1110. `server/services/monteCarlo/MonteCarloConfig.ts` — DEPENDENT: connected group, external reference example: scripts/verify-monte-carlo-evolution.cjs -> MONTE_CARLO_CRAWLER_CONFIG.md
 1111. `server/services/monteCarlo/MonteCarloCrawlerOptimizer.ts` — DEPENDENT: connected group, external reference example: scripts/verify-monte-carlo-evolution.cjs -> MONTE_CARLO_CRAWLER_CONFIG.md
@@ -1147,5 +1147,5 @@ Review considered imports, reverse callers, dynamic file access, build and verif
 1136. `supabase/functions/cryptocrawler-terminal-sweeper/shared.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 1137. `supabase/functions/cryptocrawler-terminal-sweeper/terminal.ts` — DEPENDENT: connected group, external reference example: server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts -> server/logger.ts
 
-Summary: 1100 dependent, 37 requiring review. The second legacy schema was preserved in THWART after two before-and-after checks.
+Summary: 1,100 dependency-linked files, 31 additional files not independently removable, and 6 confirmed independent candidates (not yet moved). The second legacy schema was preserved in THWART after two before-and-after checks.
 No merge or deployment.
