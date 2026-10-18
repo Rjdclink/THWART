@@ -1,7 +1,11 @@
-# Transferred T.H.W.A.R.T. files (51)
+# Transferred T.H.W.A.R.T. files (55)
 
+- `client/src/components/bps-activity-terminal.tsx`
 - `client/src/components/cryptocrawler-admin-tile.md`
 - `client/src/components/cryptocrawler-master-panel.ts`
+- `client/src/hooks/useWallet.ts`
+- `client/src/pages/cryptocrawler-dashboard.tsx`
+- `client/src/pages/cryptocrawler-v2.tsx`
 - `contracts/cryptocrawl/README.md`
 - `CRYPTOCRAWL_IMPLEMENTATION_SUMMARY.md`
 - `db/migrations/0018_add_crypto_wallet_tables.sql`
