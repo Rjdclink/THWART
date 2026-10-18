@@ -1,6 +1,7 @@
-# Transferred T.H.W.A.R.T. files (42)
+# Transferred T.H.W.A.R.T. files (43)
 
 - `CRYPTOCRAWL_IMPLEMENTATION_SUMMARY.md`
+- `db/migrations/0018_add_crypto_wallet_tables.sql`
 - `db/migrations/0022_cryptocrawl_flashbots_auth_identity.sql`
 - `docs/ARIES_EDGE_FORMATION_REACTOR.md`
 - `docs/cryptocrawl/bps-reduction-repair-evidence.md`
