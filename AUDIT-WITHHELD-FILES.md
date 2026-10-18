@@ -1,30 +1,30 @@
 # T.H.W.A.R.T. source separation audit — numbered exclusions
 
-Source: `Rjdclink/Bad-Blue` at `develop` `55118555621959f445815dfb987f4e32bd552db8`; cross-checked against Railway production source `666ce49bcccd8352cb4bb11f97073e719e10b2de`.
+**Audited source:** `Rjdclink/Bad-Blue` development SHA `55118555621959f445815dfb987f4e32bd552db8` and Railway production SHA `666ce49bcccd8352cb4bb11f97073e719e10b2de`.
 
-**Original candidate inventory:** 1,180 trading-related or ambiguously named files.
-**Previously copied and verified:** 10 source files.
-**Second-stage files passing two independence checks:** 32 (16 source/test files and 16 documentation files).
-**Numbered exclusions held for later shared-code review:** 1,138.
+**Candidate inventory:** 1,180 named T.H.W.A.R.T., CryptoCrawler, CRYPTARA, Faucet, Mesh, Beam, and related files.
+**Preserved in THWART:** 41 files (9 from the first batch, 32 from the second).
+**Numbered exclusions:** 1,139 files.
 
-Files are withheld whenever a shared dependency exists **or** independence is insufficiently established. The 1,138 exclusions must not be described as 1,138 proven shared files.
+**Important:** An exclusion means a known cross-repository dependency **or** insufficient proof of independence. It does not mean all excluded files are proven shared.
 
-Audit methods: TypeScript AST import/export analysis; direct and reverse dependency closure; dynamic filesystem, script and build-path inspection; literal source-reference search; independent production/development Git blob verification; and cautious exclusions for LegalWhat subsystems, database migrations, shared reactor/Beam infrastructure, and wallet-key material. Actual full application regression tests are still required before any merge.
+Each of the 32 second-stage source files passed two pre-copy checks (AST import/reverse-import analysis; exact development and production content/secret screening) and two post-copy checks (Git object hashes; independent full-text downloads). A subsequent combined 41-file dependency closure found zero incoming or outgoing static import or detected dynamic-file references. Full production regression verification is still required before any eventual merge or deployment.
 
-## Stage 1: already preserved in THWART (10)
+**Correction:** The Beam validator previously included in batch one was discovered to read other retained Beam files dynamically. It was restored in the unmerged Bad-Blue branch and withdrawn from THWART. The file is listed among the exclusions below.
 
-1. `server/services/computationalBeam/comprehensive-validate.ts`
-2. `server/services/cryptocrawl/enhancements/snowball-mods.ts`
-3. `server/services/cryptocrawl/mev/flashbots-engine.ts`
-4. `server/services/cryptocrawl/mev/index.ts`
-5. `server/services/cryptocrawl/mev/validator-bribing-advanced.ts`
-6. `server/services/cryptocrawl/mev/validator-bribing.ts`
-7. `server/services/cryptocrawl/stealth/config.ts`
-8. `server/services/cryptocrawl/stealth/index.ts`
-9. `server/services/cryptocrawl/stealth/telemetry.ts`
-10. `server/services/cryptocrawl/strategies/cbvh-protocol.ts`
+## Stage 1: files preserved in THWART (9)
 
-## Stage 2: approved for copy into THWART (32)
+1. `server/services/cryptocrawl/enhancements/snowball-mods.ts`
+2. `server/services/cryptocrawl/mev/flashbots-engine.ts`
+3. `server/services/cryptocrawl/mev/index.ts`
+4. `server/services/cryptocrawl/mev/validator-bribing-advanced.ts`
+5. `server/services/cryptocrawl/mev/validator-bribing.ts`
+6. `server/services/cryptocrawl/stealth/config.ts`
+7. `server/services/cryptocrawl/stealth/index.ts`
+8. `server/services/cryptocrawl/stealth/telemetry.ts`
+9. `server/services/cryptocrawl/strategies/cbvh-protocol.ts`
+
+## Stage 2: files copied and verified in THWART (32)
 
 1. `CRYPTOCRAWL_IMPLEMENTATION_SUMMARY.md`
 2. `docs/ARIES_EDGE_FORMATION_REACTOR.md`
@@ -431,774 +431,775 @@ Audit methods: TypeScript AST import/export analysis; direct and reverse depende
 368. `server/routes/reactor.routes.ts` — Intra-repository dependency or independent status not conclusively verified.
 369. `server/services/computationalBeam/ADVANCED_ENHANCEMENT_STRATEGY.md` — Documentation; retain pending fuller transfer.
 370. `server/services/computationalBeam/arbitrageOptimizer.ts` — Imports code outside the trading candidate set.
-371. `server/services/computationalBeam/credentialValidator.ts` — Intra-repository dependency or independent status not conclusively verified.
-372. `server/services/computationalBeam/cryptocrawlerConnector.ts` — Imports code outside the trading candidate set.
-373. `server/services/computationalBeam/dashboardOptimizer.ts` — Imports code outside the trading candidate set.
-374. `server/services/computationalBeam/demo.ts` — Intra-repository dependency or independent status not conclusively verified.
-375. `server/services/computationalBeam/directionalBeamLayer.ts` — Intra-repository dependency or independent status not conclusively verified.
-376. `server/services/computationalBeam/HYPER_OPTIMIZATION_STRATEGY.md` — Documentation; retain pending fuller transfer.
-377. `server/services/computationalBeam/index.ts` — Referenced by an existing runtime/build/verification entrypoint.
-378. `server/services/computationalBeam/integrityTesting.ts` — Referenced by an existing runtime/build/verification entrypoint.
-379. `server/services/computationalBeam/main.ts` — Intra-repository dependency or independent status not conclusively verified.
-380. `server/services/computationalBeam/metricsAnalytics.ts` — Referenced by an existing runtime/build/verification entrypoint.
-381. `server/services/computationalBeam/neuralLoadPredictor.ts` — Referenced by an existing runtime/build/verification entrypoint.
-382. `server/services/computationalBeam/omniAntennaLayer.ts` — Intra-repository dependency or independent status not conclusively verified.
-383. `server/services/computationalBeam/pantheonConnector.ts` — Imports code outside the trading candidate set.
-384. `server/services/computationalBeam/peopleFinderConnector.ts` — Imports code outside the trading candidate set.
-385. `server/services/computationalBeam/README.md` — Documentation; retain pending fuller transfer.
-386. `server/services/computationalBeam/safetyRules.ts` — Intra-repository dependency or independent status not conclusively verified.
-387. `server/services/computationalBeam/skale-pow-worker.cjs` — Intra-repository dependency or independent status not conclusively verified.
-388. `server/services/computationalBeam/skalePowWorkloadAdapter.ts` — Referenced by an existing runtime/build/verification entrypoint.
-389. `server/services/computationalBeam/superBatteryLayer.ts` — Intra-repository dependency or independent status not conclusively verified.
-390. `server/services/computationalBeam/testing/verify-beam-workloads.ts` — Intra-repository dependency or independent status not conclusively verified.
-391. `server/services/computationalBeam/types.ts` — Intra-repository dependency or independent status not conclusively verified.
-392. `server/services/computationalBeam/validate.ts` — Intra-repository dependency or independent status not conclusively verified.
-393. `server/services/computationalBeam/walletOptimizer.ts` — Imports code outside the trading candidate set.
-394. `server/services/computationalBeam/webSearchIntegration.ts` — Imports code outside the trading candidate set.
-395. `server/services/computationalBeam/workloadRouter.ts` — Intra-repository dependency or independent status not conclusively verified.
-396. `server/services/cryptara/index.ts` — Referenced/imported from outside the trading candidate set.
-397. `server/services/cryptara/marketGates/engine.ts` — Intra-repository dependency or independent status not conclusively verified.
-398. `server/services/cryptara/marketGates/index.ts` — Intra-repository dependency or independent status not conclusively verified.
-399. `server/services/cryptara/marketGates/types.ts` — Intra-repository dependency or independent status not conclusively verified.
-400. `server/services/cryptara/network-specialization-learning.ts` — Intra-repository dependency or independent status not conclusively verified.
-401. `server/services/cryptara/opportunity-ml-ranker.ts` — Intra-repository dependency or independent status not conclusively verified.
-402. `server/services/cryptara/zero-capital-funding-learning.ts` — Intra-repository dependency or independent status not conclusively verified.
-403. `server/services/cryptocrawl/agents/cain-crawler.ts` — Intra-repository dependency or independent status not conclusively verified.
-404. `server/services/cryptocrawl/agents/cain-twin-hybrid.ts` — Imports code outside the trading candidate set.
-405. `server/services/cryptocrawl/agents/conjoined-twin-crawler.ts` — Imports code outside the trading candidate set.
-406. `server/services/cryptocrawl/agents/enhanced-micro-crawler.ts` — Intra-repository dependency or independent status not conclusively verified.
-407. `server/services/cryptocrawl/agents/index.ts` — Intra-repository dependency or independent status not conclusively verified.
-408. `server/services/cryptocrawl/agents/starburst-replication.ts` — Imports code outside the trading candidate set.
-409. `server/services/cryptocrawl/agents/starburst-snake.ts` — Referenced/imported from outside the trading candidate set.
-410. `server/services/cryptocrawl/agents/swarm-orchestrator.ts` — Imports code outside the trading candidate set.
-411. `server/services/cryptocrawl/ai/cryptocrawler-ai-harmony.ts` — Imports code outside the trading candidate set.
-412. `server/services/cryptocrawl/ai/index.ts` — Referenced by an existing runtime/build/verification entrypoint.
-413. `server/services/cryptocrawl/api/admin-api.ts` — Referenced/imported from outside the trading candidate set.
-414. `server/services/cryptocrawl/api/blockchain-providers.ts` — Imports code outside the trading candidate set.
-415. `server/services/cryptocrawl/api/bridge-api.ts` — Referenced/imported from outside the trading candidate set.
-416. `server/services/cryptocrawl/api/canonical-dashboard-api.ts` — Intra-repository dependency or independent status not conclusively verified.
-417. `server/services/cryptocrawl/api/dashboard-api.ts` — Intra-repository dependency or independent status not conclusively verified.
-418. `server/services/cryptocrawl/api/index.ts` — Referenced/imported from outside the trading candidate set.
-419. `server/services/cryptocrawl/api/truthful-admin-diagnostics.ts` — Imports code outside the trading candidate set.
-420. `server/services/cryptocrawl/arbitrage/arbitrage-verifier.ts` — Imports code outside the trading candidate set.
-421. `server/services/cryptocrawl/babel/cain-reasoning.ts` — Imports code outside the trading candidate set.
-422. `server/services/cryptocrawl/babel/crawler-fingerprint.ts` — Imports code outside the trading candidate set.
-423. `server/services/cryptocrawl/babel/index.ts` — Intra-repository dependency or independent status not conclusively verified.
-424. `server/services/cryptocrawl/babel/light-language.ts` — Imports code outside the trading candidate set.
-425. `server/services/cryptocrawl/babel/tower-of-babel.ts` — Imports code outside the trading candidate set.
-426. `server/services/cryptocrawl/babel/tradingview-integration.ts` — Imports code outside the trading candidate set.
-427. `server/services/cryptocrawl/beam/beam.ts` — Imports code outside the trading candidate set.
-428. `server/services/cryptocrawl/beam/beamRoutes.ts` — Referenced/imported from outside the trading candidate set.
-429. `server/services/cryptocrawl/bridge/across-approval-gas-evidence.ts` — Intra-repository dependency or independent status not conclusively verified.
-430. `server/services/cryptocrawl/bridge/across-bridge-provider.ts` — Intra-repository dependency or independent status not conclusively verified.
-431. `server/services/cryptocrawl/bridge/across-terminal-amount-evidence.ts` — Intra-repository dependency or independent status not conclusively verified.
-432. `server/services/cryptocrawl/bridge/balance-monitor.ts` — Intra-repository dependency or independent status not conclusively verified.
-433. `server/services/cryptocrawl/bridge/chain-config.ts` — Referenced/imported from outside the trading candidate set.
-434. `server/services/cryptocrawl/bridge/coingecko-client.ts` — Intra-repository dependency or independent status not conclusively verified.
-435. `server/services/cryptocrawl/bridge/gas-oracle.ts` — Intra-repository dependency or independent status not conclusively verified.
-436. `server/services/cryptocrawl/bridge/index.ts` — Intra-repository dependency or independent status not conclusively verified.
-437. `server/services/cryptocrawl/bridge/live-price-mesh.ts` — Intra-repository dependency or independent status not conclusively verified.
-438. `server/services/cryptocrawl/bridge/network-health.ts` — Intra-repository dependency or independent status not conclusively verified.
-439. `server/services/cryptocrawl/bridge/position-recommender.ts` — Intra-repository dependency or independent status not conclusively verified.
-440. `server/services/cryptocrawl/bridge/route-optimizer.ts` — Intra-repository dependency or independent status not conclusively verified.
-441. `server/services/cryptocrawl/bridge/types.ts` — Intra-repository dependency or independent status not conclusively verified.
-442. `server/services/cryptocrawl/bridge/withdraw-deposit.ts` — Intra-repository dependency or independent status not conclusively verified.
-443. `server/services/cryptocrawl/CANONICAL_AUTHORITIES.md` — Documentation; retain pending fuller transfer.
-444. `server/services/cryptocrawl/capital-free/alchemy-filtered-mempool.ts` — Intra-repository dependency or independent status not conclusively verified.
-445. `server/services/cryptocrawl/capital-free/alchemy-filtered-pending-stream.ts` — Intra-repository dependency or independent status not conclusively verified.
-446. `server/services/cryptocrawl/capital-free/alchemy-integration.ts` — Imports code outside the trading candidate set.
-447. `server/services/cryptocrawl/capital-free/autonomous-optimizer.ts` — Imports code outside the trading candidate set.
-448. `server/services/cryptocrawl/capital-free/barter-system.ts` — Imports code outside the trading candidate set.
-449. `server/services/cryptocrawl/capital-free/dynamic-gas-funding-engine.ts` — Intra-repository dependency or independent status not conclusively verified.
-450. `server/services/cryptocrawl/capital-free/eden-placement-strategy.ts` — Imports code outside the trading candidate set.
-451. `server/services/cryptocrawl/capital-free/flash-liquidity-layer.ts` — Imports code outside the trading candidate set.
-452. `server/services/cryptocrawl/capital-free/gas-acquisition-system.ts` — Imports code outside the trading candidate set.
-453. `server/services/cryptocrawl/capital-free/index.ts` — Referenced by an existing runtime/build/verification entrypoint.
-454. `server/services/cryptocrawl/capital-free/nexgen-protocol-layer.ts` — Imports code outside the trading candidate set.
-455. `server/services/cryptocrawl/capital-free/partnership-formation.ts` — Imports code outside the trading candidate set.
-456. `server/services/cryptocrawl/capital-free/pending-swap-route-decoder.ts` — Intra-repository dependency or independent status not conclusively verified.
-457. `server/services/cryptocrawl/capital-free/provider-mesh-mempool-analysis.ts` — Imports code outside the trading candidate set.
-458. `server/services/cryptocrawl/capital-free/provider-mesh-pending-stream.ts` — Imports code outside the trading candidate set.
-459. `server/services/cryptocrawl/capital-free/starburst-scaling.ts` — Imports code outside the trading candidate set.
-460. `server/services/cryptocrawl/capital-free/superchain-integration.ts` — Imports code outside the trading candidate set.
-461. `server/services/cryptocrawl/compensation/compensationEngine.ts` — Imports code outside the trading candidate set.
-462. `server/services/cryptocrawl/compensation/compensationGuarantee.ts` — Referenced/imported from outside the trading candidate set.
-463. `server/services/cryptocrawl/compensation/demo.ts` — Intra-repository dependency or independent status not conclusively verified.
-464. `server/services/cryptocrawl/compensation/hyper-hybrid-partial-profit-accounting.ts` — Imports code outside the trading candidate set.
-465. `server/services/cryptocrawl/compensation/index.ts` — Intra-repository dependency or independent status not conclusively verified.
-466. `server/services/cryptocrawl/compensation/payout-recipient-confirmation-observer.ts` — Imports code outside the trading candidate set.
-467. `server/services/cryptocrawl/compensation/payoutScheduler.ts` — Imports code outside the trading candidate set.
-468. `server/services/cryptocrawl/compensation/rainbow-maker-fuel-reserve.ts` — Imports code outside the trading candidate set.
-469. `server/services/cryptocrawl/compensation/rainbow-profit-bridge.ts` — Imports code outside the trading candidate set.
-470. `server/services/cryptocrawl/compensation/rainbow-profit-observability.ts` — Imports code outside the trading candidate set.
-471. `server/services/cryptocrawl/compensation/rainbow-profit-source-ledger.ts` — Intra-repository dependency or independent status not conclusively verified.
-472. `server/services/cryptocrawl/compensation/README.md` — Documentation; retain pending fuller transfer.
-473. `server/services/cryptocrawl/compensation/retained-profit-ledger.ts` — Imports code outside the trading candidate set.
-474. `server/services/cryptocrawl/compensation/revenueStreams.ts` — Imports code outside the trading candidate set.
-475. `server/services/cryptocrawl/compensation/types.ts` — Intra-repository dependency or independent status not conclusively verified.
-476. `server/services/cryptocrawl/compensation/walletVerification.ts` — Imports code outside the trading candidate set.
-477. `server/services/cryptocrawl/config/chains.json` — Dynamically loaded by a retained CryptoCrawler module (server/services/cryptocrawl/core/wallet.ts).
-478. `server/services/cryptocrawl/config/maximum-profitability.ts` — Referenced by an existing runtime/build/verification entrypoint.
-479. `server/services/cryptocrawl/config/perChainRisk.ts` — Intra-repository dependency or independent status not conclusively verified.
-480. `server/services/cryptocrawl/config/testnet-chains.ts` — Intra-repository dependency or independent status not conclusively verified.
-481. `server/services/cryptocrawl/core/cain-crawler.ts` — Imports code outside the trading candidate set.
-482. `server/services/cryptocrawl/core/capital-hierarchy.ts` — Referenced by an existing runtime/build/verification entrypoint.
-483. `server/services/cryptocrawl/core/defensive-trading-mode.ts` — Imports code outside the trading candidate set.
-484. `server/services/cryptocrawl/core/distributedCompute.ts` — Imports code outside the trading candidate set.
-485. `server/services/cryptocrawl/core/dynamic-chain-registry.ts` — Imports code outside the trading candidate set.
-486. `server/services/cryptocrawl/core/eden-storage.ts` — Imports code outside the trading candidate set.
-487. `server/services/cryptocrawl/core/entry-signal-filter.ts` — Imports code outside the trading candidate set.
-488. `server/services/cryptocrawl/core/flashloan-atomic-engine.ts` — External code/configuration/document reference remains.
-489. `server/services/cryptocrawl/core/light-communication.ts` — Imports code outside the trading candidate set.
-490. `server/services/cryptocrawl/core/lux-swarm.ts` — Intra-repository dependency or independent status not conclusively verified.
-491. `server/services/cryptocrawl/core/market-condition-detector.ts` — Imports code outside the trading candidate set.
-492. `server/services/cryptocrawl/core/master-orchestrator.ts` — Imports code outside the trading candidate set.
-493. `server/services/cryptocrawl/core/microtask-engine.ts` — Imports code outside the trading candidate set.
-494. `server/services/cryptocrawl/core/neurofusion.ts` — Imports code outside the trading candidate set.
-495. `server/services/cryptocrawl/core/quantum-optimization-engine.ts` — Imports code outside the trading candidate set.
-496. `server/services/cryptocrawl/core/stealth-security.ts` — Imports code outside the trading candidate set.
-497. `server/services/cryptocrawl/core/wallet-identity.ts` — Intra-repository dependency or independent status not conclusively verified.
-498. `server/services/cryptocrawl/core/wallet.ts` — Intra-repository dependency or independent status not conclusively verified.
-499. `server/services/cryptocrawl/core/zero-capital-engine.ts` — Imports code outside the trading candidate set.
-500. `server/services/cryptocrawl/core/zero-capital-price-evidence.ts` — Intra-repository dependency or independent status not conclusively verified.
-501. `server/services/cryptocrawl/demo-capital-free.ts` — Intra-repository dependency or independent status not conclusively verified.
-502. `server/services/cryptocrawl/demo-swarm.ts` — Intra-repository dependency or independent status not conclusively verified.
-503. `server/services/cryptocrawl/discovery/candidate-publication-generation.ts` — Intra-repository dependency or independent status not conclusively verified.
-504. `server/services/cryptocrawl/discovery/cex-economic-barrier-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
-505. `server/services/cryptocrawl/discovery/cex-economic-barrier.ts` — Intra-repository dependency or independent status not conclusively verified.
-506. `server/services/cryptocrawl/discovery/cex-edge-attention.ts` — Intra-repository dependency or independent status not conclusively verified.
-507. `server/services/cryptocrawl/discovery/cex-fee-mode-observability.ts` — Intra-repository dependency or independent status not conclusively verified.
-508. `server/services/cryptocrawl/discovery/cex-observation-candidates.ts` — Intra-repository dependency or independent status not conclusively verified.
-509. `server/services/cryptocrawl/discovery/cex-residual-replan.ts` — Imports code outside the trading candidate set.
-510. `server/services/cryptocrawl/discovery/configured-zero-capital-gas-economics.ts` — Intra-repository dependency or independent status not conclusively verified.
-511. `server/services/cryptocrawl/discovery/cross-chain-opportunity-generator.ts` — Intra-repository dependency or independent status not conclusively verified.
-512. `server/services/cryptocrawl/discovery/cross-chain-route-economics.ts` — Intra-repository dependency or independent status not conclusively verified.
-513. `server/services/cryptocrawl/discovery/dex-opportunity-generator.ts` — Intra-repository dependency or independent status not conclusively verified.
-514. `server/services/cryptocrawl/discovery/dynamic-zero-capital-routes.ts` — Imports code outside the trading candidate set.
-515. `server/services/cryptocrawl/discovery/event-venue.ts` — Intra-repository dependency or independent status not conclusively verified.
-516. `server/services/cryptocrawl/discovery/funding-arbitrage-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
-517. `server/services/cryptocrawl/discovery/funding-rate-discovery.ts` — Imports code outside the trading candidate set.
-518. `server/services/cryptocrawl/discovery/funding-rate-monitor.ts` — Imports code outside the trading candidate set.
-519. `server/services/cryptocrawl/discovery/graphless-dex-scout.ts` — Imports code outside the trading candidate set.
-520. `server/services/cryptocrawl/discovery/kalshi-cross-venue-event-arbitrage.ts` — Imports code outside the trading candidate set.
-521. `server/services/cryptocrawl/discovery/kalshi-event-opportunity-generator.ts` — Imports code outside the trading candidate set.
-522. `server/services/cryptocrawl/discovery/liquidation-opportunity-generator.ts` — Imports code outside the trading candidate set.
-523. `server/services/cryptocrawl/discovery/maker-opportunity-generator.ts` — Intra-repository dependency or independent status not conclusively verified.
-524. `server/services/cryptocrawl/discovery/market-universe-controller.ts` — Intra-repository dependency or independent status not conclusively verified.
-525. `server/services/cryptocrawl/discovery/measured-candidate-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
-526. `server/services/cryptocrawl/discovery/mempool-capability-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
-527. `server/services/cryptocrawl/discovery/mempool-opportunity-generator.ts` — Intra-repository dependency or independent status not conclusively verified.
-528. `server/services/cryptocrawl/discovery/multi-topology-discovery-controller.ts` — Imports code outside the trading candidate set.
-529. `server/services/cryptocrawl/discovery/opportunity-graph.ts` — Imports code outside the trading candidate set.
-530. `server/services/cryptocrawl/discovery/polymarket-event-venue.ts` — Intra-repository dependency or independent status not conclusively verified.
-531. `server/services/cryptocrawl/discovery/prediction-market-opportunity-generator.ts` — Imports code outside the trading candidate set.
-532. `server/services/cryptocrawl/discovery/public-cex-discovery.ts` — Imports code outside the trading candidate set.
-533. `server/services/cryptocrawl/discovery/scan-capacity-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
-534. `server/services/cryptocrawl/discovery/stage-one-candidate-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
-535. `server/services/cryptocrawl/discovery/stage-one-dex-mempool-repair.ts` — Imports code outside the trading candidate set.
-536. `server/services/cryptocrawl/discovery/stage-one-dex-mempool-velora-recovery.ts` — Imports code outside the trading candidate set.
-537. `server/services/cryptocrawl/discovery/stage-one-measurement-recovery.ts` — Imports code outside the trading candidate set.
-538. `server/services/cryptocrawl/discovery/symbol-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
-539. `server/services/cryptocrawl/discovery/venue-capability-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
-540. `server/services/cryptocrawl/discovery/zero-capital-canonical-discovery.ts` — Imports code outside the trading candidate set.
-541. `server/services/cryptocrawl/discovery/zero-capital-route-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
-542. `server/services/cryptocrawl/discovery/zero-capital-route-preselection.ts` — Intra-repository dependency or independent status not conclusively verified.
-543. `server/services/cryptocrawl/eden/config.ts` — Intra-repository dependency or independent status not conclusively verified.
-544. `server/services/cryptocrawl/eden/deployment.ts` — Imports code outside the trading candidate set.
-545. `server/services/cryptocrawl/eden/index.ts` — Intra-repository dependency or independent status not conclusively verified.
-546. `server/services/cryptocrawl/eden/schema.ts` — Intra-repository dependency or independent status not conclusively verified.
-547. `server/services/cryptocrawl/eden/service.ts` — Referenced by an existing runtime/build/verification entrypoint.
-548. `server/services/cryptocrawl/eden/types.ts` — Referenced by an existing runtime/build/verification entrypoint.
-549. `server/services/cryptocrawl/evolution/frontier-research-integration.ts` — Imports code outside the trading candidate set.
-550. `server/services/cryptocrawl/evolution/hyper-evolution-engine.ts` — Imports code outside the trading candidate set.
-551. `server/services/cryptocrawl/evolution/index.ts` — Referenced by an existing runtime/build/verification entrypoint.
-552. `server/services/cryptocrawl/evolution/measured-execution-feedback.ts` — Imports code outside the trading candidate set.
-553. `server/services/cryptocrawl/evolution/swarm-intelligence.ts` — Imports code outside the trading candidate set.
-554. `server/services/cryptocrawl/evolution/terminal-network-funding-learning.ts` — Intra-repository dependency or independent status not conclusively verified.
-555. `server/services/cryptocrawl/evolution/zero-capital-funding-lifecycle-observer.ts` — Intra-repository dependency or independent status not conclusively verified.
-556. `server/services/cryptocrawl/execution/aave-liquidation-atomic-executor.ts` — Imports code outside the trading candidate set.
-557. `server/services/cryptocrawl/execution/across-bridge-executor.ts` — Imports code outside the trading candidate set.
-558. `server/services/cryptocrawl/execution/across-prebroadcast-durability.ts` — Imports code outside the trading candidate set.
-559. `server/services/cryptocrawl/execution/adapters/atomic-size-optimizer.ts` — Intra-repository dependency or independent status not conclusively verified.
-560. `server/services/cryptocrawl/execution/adapters/autonomous-route-planner.ts` — Intra-repository dependency or independent status not conclusively verified.
-561. `server/services/cryptocrawl/execution/adapters/bootstrap-recovery-state.ts` — Referenced by an existing runtime/build/verification entrypoint.
-562. `server/services/cryptocrawl/execution/adapters/builder-repayment-route.ts` — Intra-repository dependency or independent status not conclusively verified.
-563. `server/services/cryptocrawl/execution/adapters/builder-sequential-gas-simulator.ts` — Intra-repository dependency or independent status not conclusively verified.
-564. `server/services/cryptocrawl/execution/adapters/builder-sponsored-bundle.ts` — Imports code outside the trading candidate set.
-565. `server/services/cryptocrawl/execution/adapters/composite-flashloan-receiver-builder.ts` — Intra-repository dependency or independent status not conclusively verified.
-566. `server/services/cryptocrawl/execution/adapters/composite-route-measurement-planner.ts` — Intra-repository dependency or independent status not conclusively verified.
-567. `server/services/cryptocrawl/execution/adapters/dual-flash-loan-provider-mesh.ts` — Intra-repository dependency or independent status not conclusively verified.
-568. `server/services/cryptocrawl/execution/adapters/dual-flash-loan-provider-selection-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
-569. `server/services/cryptocrawl/execution/adapters/dual-flashloan-receiver-bootstrap.ts` — Intra-repository dependency or independent status not conclusively verified.
-570. `server/services/cryptocrawl/execution/adapters/dual-flashloan-receiver-builder.ts` — Intra-repository dependency or independent status not conclusively verified.
-571. `server/services/cryptocrawl/execution/adapters/dual-flashloan-receiver-capability.ts` — Intra-repository dependency or independent status not conclusively verified.
-572. `server/services/cryptocrawl/execution/adapters/europa-dynamic-route-discovery.ts` — Referenced by an existing runtime/build/verification entrypoint.
-573. `server/services/cryptocrawl/execution/adapters/europa-network.ts` — Intra-repository dependency or independent status not conclusively verified.
-574. `server/services/cryptocrawl/execution/adapters/europa-sushi-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
-575. `server/services/cryptocrawl/execution/adapters/europa-sushi-v3-flash-builder.ts` — Intra-repository dependency or independent status not conclusively verified.
-576. `server/services/cryptocrawl/execution/adapters/europa-zero-gas-adapter.ts` — Referenced by an existing runtime/build/verification entrypoint.
-577. `server/services/cryptocrawl/execution/adapters/flash-loan-demand-hint.ts` — Intra-repository dependency or independent status not conclusively verified.
-578. `server/services/cryptocrawl/execution/adapters/flash-loan-provider-economics.ts` — Intra-repository dependency or independent status not conclusively verified.
-579. `server/services/cryptocrawl/execution/adapters/flash-loan-provider-selection-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
-580. `server/services/cryptocrawl/execution/adapters/flash-loan-receiver-capability.ts` — Intra-repository dependency or independent status not conclusively verified.
-581. `server/services/cryptocrawl/execution/adapters/flashbots-auth-identity.ts` — Intra-repository dependency or independent status not conclusively verified.
-582. `server/services/cryptocrawl/execution/adapters/flashloan-receiver-builder.ts` — Intra-repository dependency or independent status not conclusively verified.
-583. `server/services/cryptocrawl/execution/adapters/monte-carlo-profitability.ts` — Intra-repository dependency or independent status not conclusively verified.
-584. `server/services/cryptocrawl/execution/adapters/monte-carlo-worker.ts` — Intra-repository dependency or independent status not conclusively verified.
-585. `server/services/cryptocrawl/execution/adapters/onchain-payload-builder.ts` — Intra-repository dependency or independent status not conclusively verified.
-586. `server/services/cryptocrawl/execution/adapters/onchain-route-quoter.ts` — Intra-repository dependency or independent status not conclusively verified.
-587. `server/services/cryptocrawl/execution/adapters/parallel-monte-carlo-pool.ts` — Intra-repository dependency or independent status not conclusively verified.
-588. `server/services/cryptocrawl/execution/adapters/primary-market-anchor-adapter.ts` — Intra-repository dependency or independent status not conclusively verified.
-589. `server/services/cryptocrawl/execution/adapters/primary-market-anchor-routes.ts` — Intra-repository dependency or independent status not conclusively verified.
-590. `server/services/cryptocrawl/execution/adapters/protocol-anchor-adapter.ts` — Imports code outside the trading candidate set.
-591. `server/services/cryptocrawl/execution/adapters/provider-specific-receiver-bootstrap.ts` — Intra-repository dependency or independent status not conclusively verified.
-592. `server/services/cryptocrawl/execution/adapters/railway-bootstrap-budget.ts` — Imports code outside the trading candidate set.
-593. `server/services/cryptocrawl/execution/adapters/ravn-execution-adapter.ts` — Intra-repository dependency or independent status not conclusively verified.
-594. `server/services/cryptocrawl/execution/adapters/skale-pow-adapter.ts` — Intra-repository dependency or independent status not conclusively verified.
-595. `server/services/cryptocrawl/execution/adapters/sponsored-receiver-manager.ts` — Imports code outside the trading candidate set.
-596. `server/services/cryptocrawl/execution/adapters/stage4-capital-provenance.ts` — Imports code outside the trading candidate set.
-597. `server/services/cryptocrawl/execution/adapters/stage4-execution-ledger.ts` — Imports code outside the trading candidate set.
-598. `server/services/cryptocrawl/execution/adapters/stage4-pow-compute-coordinator.ts` — Referenced by an existing runtime/build/verification entrypoint.
-599. `server/services/cryptocrawl/execution/adapters/zero-capital-route-direction.ts` — Intra-repository dependency or independent status not conclusively verified.
-600. `server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts` — Imports code outside the trading candidate set.
-601. `server/services/cryptocrawl/execution/builder-sponsored-zero-capital-coldstart.ts` — Imports code outside the trading candidate set.
-602. `server/services/cryptocrawl/execution/canonical-execution-scheduler.ts` — Imports code outside the trading candidate set.
-603. `server/services/cryptocrawl/execution/centralized-exchange-executor.ts` — Imports code outside the trading candidate set.
-604. `server/services/cryptocrawl/execution/cex-inventory-ledger.ts` — Imports code outside the trading candidate set.
-605. `server/services/cryptocrawl/execution/cex-order-mode-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
-606. `server/services/cryptocrawl/execution/cex-order-serialization.ts` — Intra-repository dependency or independent status not conclusively verified.
-607. `server/services/cryptocrawl/execution/cex-private-websocket-order-transport.ts` — Imports code outside the trading candidate set.
-608. `server/services/cryptocrawl/execution/cex-settlement.ts` — Imports code outside the trading candidate set.
-609. `server/services/cryptocrawl/execution/cex-spot-product-policy.ts` — Imports code outside the trading candidate set.
-610. `server/services/cryptocrawl/execution/cex-submit-time-product-guard.ts` — Intra-repository dependency or independent status not conclusively verified.
-611. `server/services/cryptocrawl/execution/cex-system-capital-placement.ts` — Imports code outside the trading candidate set.
-612. `server/services/cryptocrawl/execution/cex-system-capital-settlement-evidence.ts` — Intra-repository dependency or independent status not conclusively verified.
-613. `server/services/cryptocrawl/execution/cex-system-owned-inventory-transform.ts` — Imports code outside the trading candidate set.
-614. `server/services/cryptocrawl/execution/cex-system-owned-lot-ledger.ts` — Intra-repository dependency or independent status not conclusively verified.
-615. `server/services/cryptocrawl/execution/cex-treasury-transfer-worker.ts` — Imports code outside the trading candidate set.
-616. `server/services/cryptocrawl/execution/chain-native-fees.ts` — Intra-repository dependency or independent status not conclusively verified.
-617. `server/services/cryptocrawl/execution/coinbase-convert-execution-auction.ts` — Imports code outside the trading candidate set.
-618. `server/services/cryptocrawl/execution/coinbase-executable-plan-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
-619. `server/services/cryptocrawl/execution/coinbase-product-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
-620. `server/services/cryptocrawl/execution/coinbase-spot-settlement-adapter.ts` — Imports code outside the trading candidate set.
-621. `server/services/cryptocrawl/execution/coinbase-system-capital-placement.ts` — Imports code outside the trading candidate set.
-622. `server/services/cryptocrawl/execution/coinbase-system-capital-settlement-evidence.ts` — Intra-repository dependency or independent status not conclusively verified.
-623. `server/services/cryptocrawl/execution/controlled-loss-feedback-recovery.ts` — Imports code outside the trading candidate set.
-624. `server/services/cryptocrawl/execution/controlled-loss-learning-runtime.ts` — Imports code outside the trading candidate set.
-625. `server/services/cryptocrawl/execution/controlled-loss-learning-worker.ts` — Imports code outside the trading candidate set.
-626. `server/services/cryptocrawl/execution/cross-chain-durable-lifecycle.ts` — Imports code outside the trading candidate set.
-627. `server/services/cryptocrawl/execution/cryptara-dynamic-canary-controller.ts` — Intra-repository dependency or independent status not conclusively verified.
-628. `server/services/cryptocrawl/execution/dex-settlement-observer.ts` — Imports code outside the trading candidate set.
-629. `server/services/cryptocrawl/execution/dex-zerox-atomic-executor.ts` — Imports code outside the trading candidate set.
-630. `server/services/cryptocrawl/execution/distributed-api-quota.ts` — Intra-repository dependency or independent status not conclusively verified.
-631. `server/services/cryptocrawl/execution/evm-signer-lane.ts` — Intra-repository dependency or independent status not conclusively verified.
-632. `server/services/cryptocrawl/execution/exact-decimal.ts` — Intra-repository dependency or independent status not conclusively verified.
-633. `server/services/cryptocrawl/execution/exact-post-victim-backrun-compiler.ts` — Imports code outside the trading candidate set.
-634. `server/services/cryptocrawl/execution/execution-readiness.ts` — Intra-repository dependency or independent status not conclusively verified.
-635. `server/services/cryptocrawl/execution/flash-liquidation-executor.ts` — Imports code outside the trading candidate set.
-636. `server/services/cryptocrawl/execution/flash-loan-aggregator.ts` — Imports code outside the trading candidate set.
-637. `server/services/cryptocrawl/execution/funding-capital-reservation.ts` — Imports code outside the trading candidate set.
-638. `server/services/cryptocrawl/execution/funding-crosschain-execution-adapter.ts` — Imports code outside the trading candidate set.
-639. `server/services/cryptocrawl/execution/funding-position-lifecycle.ts` — Referenced/imported from outside the trading candidate set.
-640. `server/services/cryptocrawl/execution/hyper-hybrid-cex-execution.ts` — Imports code outside the trading candidate set.
-641. `server/services/cryptocrawl/execution/index.ts` — Imports code outside the trading candidate set.
-642. `server/services/cryptocrawl/execution/inventory-rebalance-executor.ts` — Imports code outside the trading candidate set.
-643. `server/services/cryptocrawl/execution/inventory-rebalancer.ts` — Intra-repository dependency or independent status not conclusively verified.
-644. `server/services/cryptocrawl/execution/kalshi-cross-venue-event-lifecycle.ts` — Imports code outside the trading candidate set.
-645. `server/services/cryptocrawl/execution/kalshi-cross-venue-terminal-reconciliation.ts` — Imports code outside the trading candidate set.
-646. `server/services/cryptocrawl/execution/kalshi-event-canonical-dispatch.ts` — Imports code outside the trading candidate set.
-647. `server/services/cryptocrawl/execution/kalshi-event-canonical-maintenance.ts` — Imports code outside the trading candidate set.
-648. `server/services/cryptocrawl/execution/kalshi-event-historical-recovery.ts` — Imports code outside the trading candidate set.
-649. `server/services/cryptocrawl/execution/kalshi-event-lifecycle.ts` — Imports code outside the trading candidate set.
-650. `server/services/cryptocrawl/execution/kalshi-event-market-maker.ts` — Imports code outside the trading candidate set.
-651. `server/services/cryptocrawl/execution/kalshi-event-order-authority.ts` — Imports code outside the trading candidate set.
-652. `server/services/cryptocrawl/execution/kalshi-event-resource-lease.ts` — Imports code outside the trading candidate set.
-653. `server/services/cryptocrawl/execution/kalshi-event-system-owned-cash-ledger.ts` — Imports code outside the trading candidate set.
-654. `server/services/cryptocrawl/execution/kalshi-funding-cex-hedge.ts` — Intra-repository dependency or independent status not conclusively verified.
-655. `server/services/cryptocrawl/execution/kalshi-funding-evidence.ts` — Imports code outside the trading candidate set.
-656. `server/services/cryptocrawl/execution/kalshi-funding-hedge-capital.ts` — Imports code outside the trading candidate set.
-657. `server/services/cryptocrawl/execution/kalshi-funding-lifecycle-adapter.ts` — Imports code outside the trading candidate set.
-658. `server/services/cryptocrawl/execution/kalshi-perps-order-authority.ts` — Imports code outside the trading candidate set.
-659. `server/services/cryptocrawl/execution/kalshi-post-cex-fallback.ts` — Intra-repository dependency or independent status not conclusively verified.
-660. `server/services/cryptocrawl/execution/kalshi-system-owned-margin-ledger.ts` — Imports code outside the trading candidate set.
-661. `server/services/cryptocrawl/execution/kraken-maker-queue-amend.ts` — Imports code outside the trading candidate set.
-662. `server/services/cryptocrawl/execution/kraken-system-capital-placement.ts` — Imports code outside the trading candidate set.
-663. `server/services/cryptocrawl/execution/low-latency-execution-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
-664. `server/services/cryptocrawl/execution/maker-lifecycle-trace.ts` — Intra-repository dependency or independent status not conclusively verified.
-665. `server/services/cryptocrawl/execution/measured-topology-execution-adapter.ts` — Imports code outside the trading candidate set.
-666. `server/services/cryptocrawl/execution/meson-zeroex-native-gas-strategy.ts` — Intra-repository dependency or independent status not conclusively verified.
-667. `server/services/cryptocrawl/execution/mev-backrun-executor.ts` — Imports code outside the trading candidate set.
-668. `server/services/cryptocrawl/execution/multi-relay-submitter.ts` — Imports code outside the trading candidate set.
-669. `server/services/cryptocrawl/execution/native-gas-funding-coordinator.ts` — Imports code outside the trading candidate set.
-670. `server/services/cryptocrawl/execution/okx-convert-execution-auction.ts` — Imports code outside the trading candidate set.
-671. `server/services/cryptocrawl/execution/okx-convert-settlement-wrapper.ts` — Imports code outside the trading candidate set.
-672. `server/services/cryptocrawl/execution/okx-funding-evidence.ts` — Intra-repository dependency or independent status not conclusively verified.
-673. `server/services/cryptocrawl/execution/okx-funding-lifecycle-adapter.ts` — Imports code outside the trading candidate set.
-674. `server/services/cryptocrawl/execution/okx-margin-short-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
-675. `server/services/cryptocrawl/execution/onchain-receiver-profit-provenance.ts` — Intra-repository dependency or independent status not conclusively verified.
-676. `server/services/cryptocrawl/execution/onchain-system-capital-ledger.ts` — Intra-repository dependency or independent status not conclusively verified.
-677. `server/services/cryptocrawl/execution/onchain-system-capital-reconciler.ts` — Imports code outside the trading candidate set.
-678. `server/services/cryptocrawl/execution/polymarket-event-order-authority.ts` — Imports code outside the trading candidate set.
-679. `server/services/cryptocrawl/execution/polymarket-event-settlement-authority.ts` — Imports code outside the trading candidate set.
-680. `server/services/cryptocrawl/execution/polymarket-system-owned-cash-ledger.ts` — Imports code outside the trading candidate set.
-681. `server/services/cryptocrawl/execution/post-only-maker-adapters.ts` — Imports code outside the trading candidate set.
-682. `server/services/cryptocrawl/execution/prepared-native-fee-budget.ts` — Intra-repository dependency or independent status not conclusively verified.
-683. `server/services/cryptocrawl/execution/resource-lease-authority.ts` — Referenced/imported from outside the trading candidate set.
-684. `server/services/cryptocrawl/execution/resource-scheduler.ts` — Imports code outside the trading candidate set.
-685. `server/services/cryptocrawl/execution/self-funded-cex-bootstrap.ts` — Imports code outside the trading candidate set.
-686. `server/services/cryptocrawl/execution/settlement-types.ts` — Intra-repository dependency or independent status not conclusively verified.
-687. `server/services/cryptocrawl/execution/stablecoin-maker-strategy.ts` — Intra-repository dependency or independent status not conclusively verified.
-688. `server/services/cryptocrawl/execution/system-capital-allocation-ledger.ts` — Intra-repository dependency or independent status not conclusively verified.
-689. `server/services/cryptocrawl/execution/system-capital-sweep-worker.ts` — Imports code outside the trading candidate set.
-690. `server/services/cryptocrawl/execution/system-native-gas-spend-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
-691. `server/services/cryptocrawl/execution/system-owned-native-transaction.ts` — Intra-repository dependency or independent status not conclusively verified.
-692. `server/services/cryptocrawl/execution/treasury-transfer-recovery-worker.ts` — Imports code outside the trading candidate set.
-693. `server/services/cryptocrawl/execution/ultra-low-latency-executor.ts` — Imports code outside the trading candidate set.
-694. `server/services/cryptocrawl/execution/unified-execution-router.ts` — Intra-repository dependency or independent status not conclusively verified.
-695. `server/services/cryptocrawl/execution/zero-capital-alternative-prepared-executor.ts` — Intra-repository dependency or independent status not conclusively verified.
-696. `server/services/cryptocrawl/execution/zero-capital-canonical-executor.ts` — Imports code outside the trading candidate set.
-697. `server/services/cryptocrawl/execution/zero-capital-composite-prepared-executor.ts` — Intra-repository dependency or independent status not conclusively verified.
-698. `server/services/cryptocrawl/execution/zero-capital-composite-selection-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
-699. `server/services/cryptocrawl/execution/zero-capital-flash-canonical-executor.ts` — Imports code outside the trading candidate set.
-700. `server/services/cryptocrawl/execution/zero-capital-realized-profit-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
-701. `server/services/cryptocrawl/execution/zero-capital-rescue-fairness.ts` — Intra-repository dependency or independent status not conclusively verified.
-702. `server/services/cryptocrawl/execution/zero-capital-resource-scheduler.ts` — Imports code outside the trading candidate set.
-703. `server/services/cryptocrawl/faucet/autonomous-faucet.ts` — Referenced/imported from outside the trading candidate set.
-704. `server/services/cryptocrawl/faucet/competition-evidence-policy.ts` — Referenced by an existing runtime/build/verification entrypoint.
-705. `server/services/cryptocrawl/faucet/concurrent-execution-wiring.ts` — Imports code outside the trading candidate set.
-706. `server/services/cryptocrawl/faucet/facet-handler.ts` — Imports code outside the trading candidate set.
-707. `server/services/cryptocrawl/faucet/facet-high-risk-tests.ts` — Intra-repository dependency or independent status not conclusively verified.
-708. `server/services/cryptocrawl/faucet/facet-simulation.ts` — Intra-repository dependency or independent status not conclusively verified.
-709. `server/services/cryptocrawl/faucet/facet-test-runner.ts` — Intra-repository dependency or independent status not conclusively verified.
-710. `server/services/cryptocrawl/faucet/higher-order-mesh.ts` — External code/configuration/document reference remains.
-711. `server/services/cryptocrawl/faucet/index.ts` — Intra-repository dependency or independent status not conclusively verified.
-712. `server/services/cryptocrawl/ghost-wallet/capital-fabric.ts` — Intra-repository dependency or independent status not conclusively verified.
-713. `server/services/cryptocrawl/ghost-wallet/existing-arbitrage-infrastructure.ts` — Intra-repository dependency or independent status not conclusively verified.
-714. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-advisory.ts` — Intra-repository dependency or independent status not conclusively verified.
-715. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-autonomous-controller.ts` — Referenced/imported from outside the trading candidate set.
-716. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-bootstrap-work-recovery.ts` — Intra-repository dependency or independent status not conclusively verified.
-717. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-borrower-demand-mesh.ts` — Imports code outside the trading candidate set.
-718. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-borrower-mandate.ts` — Referenced/imported from outside the trading candidate set.
-719. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-borrower-surface.ts` — Referenced/imported from outside the trading candidate set.
-720. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-builder.ts` — Intra-repository dependency or independent status not conclusively verified.
-721. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-chain-events.ts` — Imports code outside the trading candidate set.
-722. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-controller-economics.ts` — Intra-repository dependency or independent status not conclusively verified.
-723. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-engine.ts` — Referenced/imported from outside the trading candidate set.
-724. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-external-bridge.ts` — Referenced/imported from outside the trading candidate set.
-725. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-funding-mesh.ts` — Intra-repository dependency or independent status not conclusively verified.
-726. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-gas-pricing.ts` — Intra-repository dependency or independent status not conclusively verified.
-727. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-gas-reserve-schema.ts` — Intra-repository dependency or independent status not conclusively verified.
-728. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-gas-reserve.ts` — Imports code outside the trading candidate set.
-729. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-infrastructure-manager.ts` — Intra-repository dependency or independent status not conclusively verified.
-730. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-intermediary-bootstrap.ts` — Imports code outside the trading candidate set.
-731. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-log-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
-732. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-mandate-runtime-guard.ts` — Intra-repository dependency or independent status not conclusively verified.
-733. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-payout.ts` — Intra-repository dependency or independent status not conclusively verified.
-734. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-performance-intelligence.ts` — Referenced/imported from outside the trading candidate set.
-735. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-pimlico-sponsor.ts` — Intra-repository dependency or independent status not conclusively verified.
-736. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-provider-mesh.ts` — Referenced/imported from outside the trading candidate set.
-737. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-runtime-state.ts` — Intra-repository dependency or independent status not conclusively verified.
-738. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-settlement-ingest.ts` — Intra-repository dependency or independent status not conclusively verified.
-739. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-ultra-worker.ts` — Imports code outside the trading candidate set.
-740. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-uniswapx-demand.ts` — Imports code outside the trading candidate set.
-741. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-venue-universe.ts` — Intra-repository dependency or independent status not conclusively verified.
-742. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-work-codec.ts` — Intra-repository dependency or independent status not conclusively verified.
-743. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-work-dedupe.ts` — Intra-repository dependency or independent status not conclusively verified.
-744. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-work-ledger.ts` — Intra-repository dependency or independent status not conclusively verified.
-745. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-work-signal.ts` — Intra-repository dependency or independent status not conclusively verified.
-746. `server/services/cryptocrawl/ghost-wallet/intent-book.ts` — Intra-repository dependency or independent status not conclusively verified.
-747. `server/services/cryptocrawl/ghost-wallet/onchain-capital-sources.ts` — Intra-repository dependency or independent status not conclusively verified.
-748. `server/services/cryptocrawl/ghost-wallet/profit-funded-native-payout.ts` — Intra-repository dependency or independent status not conclusively verified.
-749. `server/services/cryptocrawl/ghost-wallet/zero-capital-alternative-selection-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
-750. `server/services/cryptocrawl/governance/adaptive-profit-operating-envelope.ts` — Intra-repository dependency or independent status not conclusively verified.
-751. `server/services/cryptocrawl/governance/arbitrage-agents.ts` — Referenced/imported from outside the trading candidate set.
-752. `server/services/cryptocrawl/governance/atomic-zero-capital-strategy-coverage.ts` — Intra-repository dependency or independent status not conclusively verified.
-753. `server/services/cryptocrawl/governance/automatic-stage-progression.ts` — Imports code outside the trading candidate set.
-754. `server/services/cryptocrawl/governance/autonomy.ts` — Intra-repository dependency or independent status not conclusively verified.
-755. `server/services/cryptocrawl/governance/compatibility.ts` — Intra-repository dependency or independent status not conclusively verified.
-756. `server/services/cryptocrawl/governance/composer-interface.ts` — Imports code outside the trading candidate set.
-757. `server/services/cryptocrawl/governance/cryptara-integration.ts` — Imports code outside the trading candidate set.
-758. `server/services/cryptocrawl/governance/DEPLOYMENT_GUIDE.md` — Documentation; retain pending fuller transfer.
-759. `server/services/cryptocrawl/governance/diagnostic.ts` — Intra-repository dependency or independent status not conclusively verified.
-760. `server/services/cryptocrawl/governance/escalation.ts` — Intra-repository dependency or independent status not conclusively verified.
-761. `server/services/cryptocrawl/governance/governance.ts` — Imports code outside the trading candidate set.
-762. `server/services/cryptocrawl/governance/handler.ts` — Intra-repository dependency or independent status not conclusively verified.
-763. `server/services/cryptocrawl/governance/hard-limits.ts` — Intra-repository dependency or independent status not conclusively verified.
-764. `server/services/cryptocrawl/governance/index.ts` — Referenced/imported from outside the trading candidate set.
-765. `server/services/cryptocrawl/governance/kill-switch.ts` — Imports code outside the trading candidate set.
-766. `server/services/cryptocrawl/governance/monitoring-dashboard.ts` — Imports code outside the trading candidate set.
-767. `server/services/cryptocrawl/governance/operator-trading-strategy.ts` — Imports code outside the trading candidate set.
-768. `server/services/cryptocrawl/governance/profit-admission-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
-769. `server/services/cryptocrawl/governance/profit-ladder-daily-profit-budget.ts` — Intra-repository dependency or independent status not conclusively verified.
-770. `server/services/cryptocrawl/governance/profit-ladder-notional-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
-771. `server/services/cryptocrawl/governance/profit-ladder.ts` — Imports code outside the trading candidate set.
-772. `server/services/cryptocrawl/governance/risk-governor.ts` — Referenced/imported from outside the trading candidate set.
-773. `server/services/cryptocrawl/governance/stage-governor.ts` — Intra-repository dependency or independent status not conclusively verified.
-774. `server/services/cryptocrawl/governance/stage-management.ts` — Imports code outside the trading candidate set.
-775. `server/services/cryptocrawl/governance/stage-one-bootstrap-authority.ts` — Imports code outside the trading candidate set.
-776. `server/services/cryptocrawl/governance/stage-one-evidence-hydrator.ts` — Imports code outside the trading candidate set.
-777. `server/services/cryptocrawl/governance/stage-state-store.ts` — Intra-repository dependency or independent status not conclusively verified.
-778. `server/services/cryptocrawl/governance/system-control.ts` — Intra-repository dependency or independent status not conclusively verified.
-779. `server/services/cryptocrawl/governance/tests/governance-test-suite.ts` — Imports code outside the trading candidate set.
-780. `server/services/cryptocrawl/governance/treasury-execution-barrier.ts` — Intra-repository dependency or independent status not conclusively verified.
-781. `server/services/cryptocrawl/governance/types.ts` — Intra-repository dependency or independent status not conclusively verified.
-782. `server/services/cryptocrawl/governance/zero-capital-infrastructure-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
-783. `server/services/cryptocrawl/HYPER_EVOLVING_SWARM.md` — Documentation; retain pending fuller transfer.
-784. `server/services/cryptocrawl/index.ts` — Referenced by an existing runtime/build/verification entrypoint.
-785. `server/services/cryptocrawl/initial-gas-readiness.ts` — Intra-repository dependency or independent status not conclusively verified.
-786. `server/services/cryptocrawl/integration/across-bridge-observability.ts` — Imports code outside the trading candidate set.
-787. `server/services/cryptocrawl/integration/ape-adaptive-command.ts` — Intra-repository dependency or independent status not conclusively verified.
-788. `server/services/cryptocrawl/integration/ape-directional-market.ts` — Intra-repository dependency or independent status not conclusively verified.
-789. `server/services/cryptocrawl/integration/ape-hypergraph-intelligence.ts` — Intra-repository dependency or independent status not conclusively verified.
-790. `server/services/cryptocrawl/integration/ape-measured-opportunity-admission.ts` — Intra-repository dependency or independent status not conclusively verified.
-791. `server/services/cryptocrawl/integration/ape-profitability-toolbox.ts` — Intra-repository dependency or independent status not conclusively verified.
-792. `server/services/cryptocrawl/integration/ape-profitable-snapshot-lease.ts` — Intra-repository dependency or independent status not conclusively verified.
-793. `server/services/cryptocrawl/integration/ape-rescue-orchestration.ts` — Intra-repository dependency or independent status not conclusively verified.
-794. `server/services/cryptocrawl/integration/ape-resident-workbench.ts` — Intra-repository dependency or independent status not conclusively verified.
-795. `server/services/cryptocrawl/integration/atomic-bps-anytime-race.ts` — External code/configuration/document reference remains.
-796. `server/services/cryptocrawl/integration/atomic-profitability-resident-routing.ts` — Intra-repository dependency or independent status not conclusively verified.
-797. `server/services/cryptocrawl/integration/authenticated-fee-tier-optimization-wiring.ts` — Imports code outside the trading candidate set.
-798. `server/services/cryptocrawl/integration/authoritative-monte-carlo-wiring.ts` — Imports code outside the trading candidate set.
-799. `server/services/cryptocrawl/integration/bps-activity.ts` — Imports code outside the trading candidate set.
-800. `server/services/cryptocrawl/integration/bps-compression-mesh.ts` — Imports code outside the trading candidate set.
-801. `server/services/cryptocrawl/integration/bps-decomposition-observability.ts` — Imports code outside the trading candidate set.
-802. `server/services/cryptocrawl/integration/bps-frontier-wave3-wiring.ts` — Imports code outside the trading candidate set.
-803. `server/services/cryptocrawl/integration/bps-private-refund-evidence.ts` — Imports code outside the trading candidate set.
-804. `server/services/cryptocrawl/integration/canonical-runtime-wiring.ts` — Imports code outside the trading candidate set.
-805. `server/services/cryptocrawl/integration/cex-fee-recovery-wiring.ts` — Imports code outside the trading candidate set.
-806. `server/services/cryptocrawl/integration/cex-four-mode-observability-wiring.ts` — Imports code outside the trading candidate set.
-807. `server/services/cryptocrawl/integration/cex-inventory-readiness-wiring.ts` — Imports code outside the trading candidate set.
-808. `server/services/cryptocrawl/integration/computational-reactor-wiring.ts` — Imports code outside the trading candidate set.
-809. `server/services/cryptocrawl/integration/cross-venue-timing-guard-wiring.ts` — Imports code outside the trading candidate set.
-810. `server/services/cryptocrawl/integration/cryptara-assessment-wiring.ts` — Imports code outside the trading candidate set.
-811. `server/services/cryptocrawl/integration/cryptara-beam-wiring.ts` — Referenced/imported from outside the trading candidate set.
-812. `server/services/cryptocrawl/integration/cryptara-bootstrap-wiring.ts` — Imports code outside the trading candidate set.
-813. `server/services/cryptocrawl/integration/cryptara-cex-evidence-wiring.ts` — Imports code outside the trading candidate set.
-814. `server/services/cryptocrawl/integration/cryptara-kalshi-prediction-wiring.ts` — Imports code outside the trading candidate set.
-815. `server/services/cryptocrawl/integration/cryptara-ml-persistence.ts` — Imports code outside the trading candidate set.
-816. `server/services/cryptocrawl/integration/cryptara-overflow-primary-gateway.ts` — Intra-repository dependency or independent status not conclusively verified.
-817. `server/services/cryptocrawl/integration/cryptara-overflow-super-worker.ts` — Intra-repository dependency or independent status not conclusively verified.
-818. `server/services/cryptocrawl/integration/cryptara-parallel-cognition.ts` — Intra-repository dependency or independent status not conclusively verified.
-819. `server/services/cryptocrawl/integration/cryptara-predictive-prefetch-wiring.ts` — Imports code outside the trading candidate set.
-820. `server/services/cryptocrawl/integration/cryptara-primary-archive-worker.ts` — Imports code outside the trading candidate set.
-821. `server/services/cryptocrawl/integration/cryptara-provider-consensus-wiring.ts` — Imports code outside the trading candidate set.
-822. `server/services/cryptocrawl/integration/cryptara-resource-intelligence.ts` — Intra-repository dependency or independent status not conclusively verified.
-823. `server/services/cryptocrawl/integration/cryptara-shared-readiness.ts` — Intra-repository dependency or independent status not conclusively verified.
-824. `server/services/cryptocrawl/integration/cryptara-sovereign-cortex-wiring.ts` — Imports code outside the trading candidate set.
-825. `server/services/cryptocrawl/integration/cryptara-supabase-admission-worker.ts` — Imports code outside the trading candidate set.
-826. `server/services/cryptocrawl/integration/cryptara-supabase-comp-switch.ts` — Intra-repository dependency or independent status not conclusively verified.
-827. `server/services/cryptocrawl/integration/cryptara-supabase-hyper-bridge-bootstrap.ts` — Intra-repository dependency or independent status not conclusively verified.
-828. `server/services/cryptocrawl/integration/cryptara-supabase-hyper-bridge.ts` — Intra-repository dependency or independent status not conclusively verified.
-829. `server/services/cryptocrawl/integration/cryptara-supabase-overflow-worker.ts` — Imports code outside the trading candidate set.
-830. `server/services/cryptocrawl/integration/cryptara-super-worker.ts` — Intra-repository dependency or independent status not conclusively verified.
-831. `server/services/cryptocrawl/integration/cryptara-two-speed-revalidation-wiring.ts` — Imports code outside the trading candidate set.
-832. `server/services/cryptocrawl/integration/dual-provider-zero-capital-execution-wiring.ts` — Imports code outside the trading candidate set.
-833. `server/services/cryptocrawl/integration/dynamic-profitability-admission-wiring.ts` — Imports code outside the trading candidate set.
-834. `server/services/cryptocrawl/integration/economic-transformation-wiring.ts` — Imports code outside the trading candidate set.
-835. `server/services/cryptocrawl/integration/execution-readiness-profitability-wiring.ts` — Imports code outside the trading candidate set.
-836. `server/services/cryptocrawl/integration/external-capital-selection-observer.ts` — Imports code outside the trading candidate set.
-837. `server/services/cryptocrawl/integration/filtered-mempool-observability.ts` — Imports code outside the trading candidate set.
-838. `server/services/cryptocrawl/integration/inventory-constrained-cex-execution-wiring.ts` — Imports code outside the trading candidate set.
-839. `server/services/cryptocrawl/integration/kalshi-bps-optimization-wiring.ts` — Imports code outside the trading candidate set.
-840. `server/services/cryptocrawl/integration/kalshi-monte-carlo-context-wiring.ts` — Imports code outside the trading candidate set.
-841. `server/services/cryptocrawl/integration/kalshi-quanti-context.ts` — Intra-repository dependency or independent status not conclusively verified.
-842. `server/services/cryptocrawl/integration/kalshi-system-wiring.ts` — Imports code outside the trading candidate set.
-843. `server/services/cryptocrawl/integration/learning-lifecycle-wiring.ts` — Imports code outside the trading candidate set.
-844. `server/services/cryptocrawl/integration/legacy-intelligence-quarantine.ts` — Imports code outside the trading candidate set.
-845. `server/services/cryptocrawl/integration/master-orchestrator-measured-wiring.ts` — Imports code outside the trading candidate set.
-846. `server/services/cryptocrawl/integration/master-pipeline.ts` — Referenced/imported from outside the trading candidate set.
-847. `server/services/cryptocrawl/integration/measured-candidate-expiry-guard-wiring.ts` — Imports code outside the trading candidate set.
-848. `server/services/cryptocrawl/integration/measured-rebalance-route-evidence-wiring.ts` — Imports code outside the trading candidate set.
-849. `server/services/cryptocrawl/integration/monte-carlo-calibration-wiring.ts` — Imports code outside the trading candidate set.
-850. `server/services/cryptocrawl/integration/oracle-evidence-wiring.ts` — Imports code outside the trading candidate set.
-851. `server/services/cryptocrawl/integration/order-book-evolution-wiring.ts` — Imports code outside the trading candidate set.
-852. `server/services/cryptocrawl/integration/overflow-learning-persistence.ts` — Intra-repository dependency or independent status not conclusively verified.
-853. `server/services/cryptocrawl/integration/prediction-market-discovery-wiring.ts` — Imports code outside the trading candidate set.
-854. `server/services/cryptocrawl/integration/primary-learning-persistence.ts` — Imports code outside the trading candidate set.
-855. `server/services/cryptocrawl/integration/profitability-recovery-coordinator.ts` — Imports code outside the trading candidate set.
-856. `server/services/cryptocrawl/integration/provider-specific-zero-capital-execution-wiring.ts` — Imports code outside the trading candidate set.
-857. `server/services/cryptocrawl/integration/runtime-json-state-store.ts` — Intra-repository dependency or independent status not conclusively verified.
-858. `server/services/cryptocrawl/integration/runtime-observability.ts` — Imports code outside the trading candidate set.
-859. `server/services/cryptocrawl/integration/stage-one-spread-observability.ts` — Imports code outside the trading candidate set.
-860. `server/services/cryptocrawl/integration/stage-two-cross-chain-reduction.ts` — Imports code outside the trading candidate set.
-861. `server/services/cryptocrawl/integration/stage-two-zero-capital-bps-reduction.ts` — Imports code outside the trading candidate set.
-862. `server/services/cryptocrawl/integration/technical-evidence-synchronizer.ts` — Imports code outside the trading candidate set.
-863. `server/services/cryptocrawl/integration/telemetry-bootstrap.ts` — Imports code outside the trading candidate set.
-864. `server/services/cryptocrawl/integration/universal-bps-rescue-coordinator.ts` — Imports code outside the trading candidate set.
-865. `server/services/cryptocrawl/integration/zero-capital-alternative-capital-wiring.ts` — Intra-repository dependency or independent status not conclusively verified.
-866. `server/services/cryptocrawl/integration/zero-capital-atomic-bps-engine.ts` — Imports code outside the trading candidate set.
-867. `server/services/cryptocrawl/integration/zero-capital-atomic-bps-workers.ts` — Referenced by an existing runtime/build/verification entrypoint.
-868. `server/services/cryptocrawl/integration/zero-capital-atomic-stack-wiring.ts` — Imports code outside the trading candidate set.
-869. `server/services/cryptocrawl/integration/zero-capital-dynamic-attempt-barrier-wiring.ts` — Imports code outside the trading candidate set.
-870. `server/services/cryptocrawl/integration/zero-capital-flash-provider-wiring.ts` — Imports code outside the trading candidate set.
-871. `server/services/cryptocrawl/integration/zero-capital-profit-output-floor.ts` — Intra-repository dependency or independent status not conclusively verified.
-872. `server/services/cryptocrawl/integration/zero-capital-profitability-rescue-fair.ts` — Imports code outside the trading candidate set.
-873. `server/services/cryptocrawl/integration/zero-capital-profitability-rescue-v2.ts` — Imports code outside the trading candidate set.
-874. `server/services/cryptocrawl/integration/zero-capital-profitability-rescue-v3.ts` — Imports code outside the trading candidate set.
-875. `server/services/cryptocrawl/integration/zero-capital-profitability-rescue-v4.ts` — Imports code outside the trading candidate set.
-876. `server/services/cryptocrawl/integration/zero-capital-readiness-diagnostics.ts` — Imports code outside the trading candidate set.
-877. `server/services/cryptocrawl/integration/zero-capital-recovery-observability.ts` — Imports code outside the trading candidate set.
-878. `server/services/cryptocrawl/integration/zero-capital-resource-wiring.ts` — Imports code outside the trading candidate set.
-879. `server/services/cryptocrawl/integration/zero-capital-route-split-rescue-core.ts` — Imports code outside the trading candidate set.
-880. `server/services/cryptocrawl/integration/zero-capital-route-split-rescue.ts` — Imports code outside the trading candidate set.
-881. `server/services/cryptocrawl/integration/zero-capital-shadow-priority-wiring.ts` — Imports code outside the trading candidate set.
-882. `server/services/cryptocrawl/integration/zero-capital-stage-handoff-supervisor.ts` — Imports code outside the trading candidate set.
-883. `server/services/cryptocrawl/integration/zerox-budget-observability.ts` — Imports code outside the trading candidate set.
-884. `server/services/cryptocrawl/integrity/operational-integrity.ts` — Imports code outside the trading candidate set.
-885. `server/services/cryptocrawl/intelligence/aries-edge-formation-reactor.ts` — Intra-repository dependency or independent status not conclusively verified.
-886. `server/services/cryptocrawl/intelligence/aries-microstructure.ts` — Intra-repository dependency or independent status not conclusively verified.
-887. `server/services/cryptocrawl/intelligence/aries-vault.ts` — Intra-repository dependency or independent status not conclusively verified.
-888. `server/services/cryptocrawl/intelligence/canonical-intelligence-outbox.ts` — Imports code outside the trading candidate set.
-889. `server/services/cryptocrawl/intelligence/canonical-intelligence-repository.ts` — Imports code outside the trading candidate set.
-890. `server/services/cryptocrawl/intelligence/canonical-opportunity-state.ts` — Intra-repository dependency or independent status not conclusively verified.
-891. `server/services/cryptocrawl/intelligence/cex-cross-impact-advisory.ts` — Intra-repository dependency or independent status not conclusively verified.
-892. `server/services/cryptocrawl/intelligence/cex-fee-recovery-authority.ts` — Imports code outside the trading candidate set.
-893. `server/services/cryptocrawl/intelligence/cex-fee-resolver.ts` — Imports code outside the trading candidate set.
-894. `server/services/cryptocrawl/intelligence/cex-four-mode-matrix.ts` — Intra-repository dependency or independent status not conclusively verified.
-895. `server/services/cryptocrawl/intelligence/cex-order-book-stream.ts` — Imports code outside the trading candidate set.
-896. `server/services/cryptocrawl/intelligence/cex-order-control-health.ts` — Intra-repository dependency or independent status not conclusively verified.
-897. `server/services/cryptocrawl/intelligence/cex-private-authority.ts` — Imports code outside the trading candidate set.
-898. `server/services/cryptocrawl/intelligence/cex-private-execution-feedback.ts` — Imports code outside the trading candidate set.
-899. `server/services/cryptocrawl/intelligence/coinbase-advanced-market-data.ts` — Imports code outside the trading candidate set.
-900. `server/services/cryptocrawl/intelligence/coinbase-advanced-trade-authority.ts` — Imports code outside the trading candidate set.
-901. `server/services/cryptocrawl/intelligence/coinbase-app-private-authority.ts` — Imports code outside the trading candidate set.
-902. `server/services/cryptocrawl/intelligence/coinbase-app-read-authority.ts` — Imports code outside the trading candidate set.
-903. `server/services/cryptocrawl/intelligence/coinbase-fee-evidence.ts` — Imports code outside the trading candidate set.
-904. `server/services/cryptocrawl/intelligence/coinbase-fee-rebate-authority.ts` — Imports code outside the trading candidate set.
-905. `server/services/cryptocrawl/intelligence/coinbase-private-execution-feedback.ts` — Imports code outside the trading candidate set.
-906. `server/services/cryptocrawl/intelligence/coinbase-stablepair-fee-authority.ts` — Imports code outside the trading candidate set.
-907. `server/services/cryptocrawl/intelligence/dex-quote-provider-mesh.ts` — Imports code outside the trading candidate set.
-908. `server/services/cryptocrawl/intelligence/erc20-decimals-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
-909. `server/services/cryptocrawl/intelligence/gravity-reaper.ts` — Imports code outside the trading candidate set.
-910. `server/services/cryptocrawl/intelligence/hyper-neural-predictor.ts` — Imports code outside the trading candidate set.
-911. `server/services/cryptocrawl/intelligence/index.ts` — Referenced by an existing runtime/build/verification entrypoint.
-912. `server/services/cryptocrawl/intelligence/kalshi-authenticated-authority.ts` — Imports code outside the trading candidate set.
-913. `server/services/cryptocrawl/intelligence/kalshi-capital-efficiency-authority.ts` — Imports code outside the trading candidate set.
-914. `server/services/cryptocrawl/intelligence/kalshi-event-depth-authority.ts` — Imports code outside the trading candidate set.
-915. `server/services/cryptocrawl/intelligence/kalshi-event-fee-authority.ts` — Imports code outside the trading candidate set.
-916. `server/services/cryptocrawl/intelligence/kalshi-event-market-making-authority.ts` — Imports code outside the trading candidate set.
-917. `server/services/cryptocrawl/intelligence/kalshi-event-semantics-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
-918. `server/services/cryptocrawl/intelligence/kalshi-margin-fee-authority.ts` — Imports code outside the trading candidate set.
-919. `server/services/cryptocrawl/intelligence/kalshi-perps-market-authority.ts` — Imports code outside the trading candidate set.
-920. `server/services/cryptocrawl/intelligence/kalshi-prediction-market-authority.ts` — Imports code outside the trading candidate set.
-921. `server/services/cryptocrawl/intelligence/kalshi-probability-calibration-authority.ts` — Imports code outside the trading candidate set.
-922. `server/services/cryptocrawl/intelligence/kraken-funding-beta-authority.ts` — Imports code outside the trading candidate set.
-923. `server/services/cryptocrawl/intelligence/kraken-l3-queue-intelligence.ts` — Imports code outside the trading candidate set.
-924. `server/services/cryptocrawl/intelligence/liquidity-resilience.ts` — Intra-repository dependency or independent status not conclusively verified.
-925. `server/services/cryptocrawl/intelligence/maker-microstructure-proof.ts` — Imports code outside the trading candidate set.
-926. `server/services/cryptocrawl/intelligence/maker-terminal-calibration.ts` — Intra-repository dependency or independent status not conclusively verified.
-927. `server/services/cryptocrawl/intelligence/maker-tick-queue-optimizer.ts` — Intra-repository dependency or independent status not conclusively verified.
-928. `server/services/cryptocrawl/intelligence/market-data-providers.ts` — Imports code outside the trading candidate set.
-929. `server/services/cryptocrawl/intelligence/okx-account-fee-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
-930. `server/services/cryptocrawl/intelligence/okx-region-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
-931. `server/services/cryptocrawl/intelligence/okx-rpi-capability.ts` — Intra-repository dependency or independent status not conclusively verified.
-932. `server/services/cryptocrawl/intelligence/okx-rpi-fee-advisory.ts` — Imports code outside the trading candidate set.
-933. `server/services/cryptocrawl/intelligence/okx-rpi-taker-depth.ts` — Intra-repository dependency or independent status not conclusively verified.
-934. `server/services/cryptocrawl/intelligence/parallel-lanes.ts` — Imports code outside the trading candidate set.
-935. `server/services/cryptocrawl/intelligence/polymarket-authenticated-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
-936. `server/services/cryptocrawl/intelligence/polymarket-geographic-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
-937. `server/services/cryptocrawl/intelligence/profit-estimator.ts` — Intra-repository dependency or independent status not conclusively verified.
-938. `server/services/cryptocrawl/intelligence/provider-quality-auction.ts` — Intra-repository dependency or independent status not conclusively verified.
-939. `server/services/cryptocrawl/intelligence/six-cane-system.ts` — Imports code outside the trading candidate set.
-940. `server/services/cryptocrawl/intelligence/sovereign-antenna-quality.ts` — Intra-repository dependency or independent status not conclusively verified.
-941. `server/services/cryptocrawl/intelligence/token-contract-directory.ts` — Imports code outside the trading candidate set.
-942. `server/services/cryptocrawl/intelligence/universal-bps-opportunity-discovery.ts` — Imports code outside the trading candidate set.
-943. `server/services/cryptocrawl/intelligence/universal-bps-search-expansion.ts` — Imports code outside the trading candidate set.
-944. `server/services/cryptocrawl/intelligence/zerox-fee-economics.ts` — Intra-repository dependency or independent status not conclusively verified.
-945. `server/services/cryptocrawl/intelligence/zerox-request-budget.ts` — Intra-repository dependency or independent status not conclusively verified.
-946. `server/services/cryptocrawl/intelligence/zerox-request-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
-947. `server/services/cryptocrawl/learning/deep-learning-store.ts` — Imports code outside the trading candidate set.
-948. `server/services/cryptocrawl/learning/execution-outcome.ts` — Intra-repository dependency or independent status not conclusively verified.
-949. `server/services/cryptocrawl/learning/instant-learning-engine.ts` — Imports code outside the trading candidate set.
-950. `server/services/cryptocrawl/learning/reinforcement-learning-bidder.ts` — Imports code outside the trading candidate set.
-951. `server/services/cryptocrawl/learning/settlement-profit-calibrator.ts` — Intra-repository dependency or independent status not conclusively verified.
-952. `server/services/cryptocrawl/learning/supabase-compatibility.ts` — Imports code outside the trading candidate set.
-953. `server/services/cryptocrawl/learning/terminal-feedback-identity.ts` — Intra-repository dependency or independent status not conclusively verified.
-954. `server/services/cryptocrawl/legacy/index.ts` — Referenced by an existing runtime/build/verification entrypoint.
-955. `server/services/cryptocrawl/mev/triple-dip-extractor.ts` — Imports code outside the trading candidate set.
-956. `server/services/cryptocrawl/optimization/adaptive-profitability-search-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
-957. `server/services/cryptocrawl/optimization/adaptive-topology-optimizer.ts` — Intra-repository dependency or independent status not conclusively verified.
-958. `server/services/cryptocrawl/optimization/bps-reduction-super-engine.ts` — Intra-repository dependency or independent status not conclusively verified.
-959. `server/services/cryptocrawl/optimization/cryptara-adaptive-strategy-state.ts` — Imports code outside the trading candidate set.
-960. `server/services/cryptocrawl/optimization/cryptara-decision-priority.ts` — Intra-repository dependency or independent status not conclusively verified.
-961. `server/services/cryptocrawl/optimization/divine-engine.ts` — Imports code outside the trading candidate set.
-962. `server/services/cryptocrawl/optimization/dynamic-execution-path-selector.ts` — Intra-repository dependency or independent status not conclusively verified.
-963. `server/services/cryptocrawl/optimization/economic-transformation-engine.ts` — Intra-repository dependency or independent status not conclusively verified.
-964. `server/services/cryptocrawl/optimization/execution-readiness-profitability-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
-965. `server/services/cryptocrawl/optimization/external-capital-capability-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
-966. `server/services/cryptocrawl/optimization/fee-surface-hyperdynamic-strategy-engine.ts` — Intra-repository dependency or independent status not conclusively verified.
-967. `server/services/cryptocrawl/optimization/hyperdynamic-bps-solution-engine.ts` — Intra-repository dependency or independent status not conclusively verified.
-968. `server/services/cryptocrawl/optimization/index.ts` — Referenced by an existing runtime/build/verification entrypoint.
-969. `server/services/cryptocrawl/optimization/marginal-bps-allocator.ts` — Intra-repository dependency or independent status not conclusively verified.
-970. `server/services/cryptocrawl/optimization/nix-gen/authority.ts` — Intra-repository dependency or independent status not conclusively verified.
-971. `server/services/cryptocrawl/optimization/nix-gen/canonical-bid-adapters.ts` — Intra-repository dependency or independent status not conclusively verified.
-972. `server/services/cryptocrawl/optimization/nix-gen/capital-routing-advisory.ts` — Intra-repository dependency or independent status not conclusively verified.
-973. `server/services/cryptocrawl/optimization/nix-gen/cex-ordering.ts` — Intra-repository dependency or independent status not conclusively verified.
-974. `server/services/cryptocrawl/optimization/nix-gen/completion-manifest.ts` — Intra-repository dependency or independent status not conclusively verified.
-975. `server/services/cryptocrawl/optimization/nix-gen/coordinator.ts` — Intra-repository dependency or independent status not conclusively verified.
-976. `server/services/cryptocrawl/optimization/nix-gen/dual-resource-pricing.ts` — Intra-repository dependency or independent status not conclusively verified.
-977. `server/services/cryptocrawl/optimization/nix-gen/global-live-portfolio.ts` — Intra-repository dependency or independent status not conclusively verified.
-978. `server/services/cryptocrawl/optimization/nix-gen/global-optimizer.ts` — Intra-repository dependency or independent status not conclusively verified.
-979. `server/services/cryptocrawl/optimization/nix-gen/index.ts` — Intra-repository dependency or independent status not conclusively verified.
-980. `server/services/cryptocrawl/optimization/nix-gen/integration-contract.ts` — Intra-repository dependency or independent status not conclusively verified.
-981. `server/services/cryptocrawl/optimization/nix-gen/kalshi-advisory.ts` — Intra-repository dependency or independent status not conclusively verified.
-982. `server/services/cryptocrawl/optimization/nix-gen/live-priority-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
-983. `server/services/cryptocrawl/optimization/nix-gen/marginal-resource-value.ts` — Intra-repository dependency or independent status not conclusively verified.
-984. `server/services/cryptocrawl/optimization/nix-gen/measured-portfolio-preparation.ts` — Intra-repository dependency or independent status not conclusively verified.
-985. `server/services/cryptocrawl/optimization/nix-gen/portfolio-view.ts` — Intra-repository dependency or independent status not conclusively verified.
-986. `server/services/cryptocrawl/optimization/nix-gen/quanti-analysis.ts` — Intra-repository dependency or independent status not conclusively verified.
-987. `server/services/cryptocrawl/optimization/nix-gen/README.md` — Documentation; retain pending fuller transfer.
-988. `server/services/cryptocrawl/optimization/nix-gen/replanner.ts` — Intra-repository dependency or independent status not conclusively verified.
-989. `server/services/cryptocrawl/optimization/nix-gen/resource-opportunity-pricing.ts` — Intra-repository dependency or independent status not conclusively verified.
-990. `server/services/cryptocrawl/optimization/nix-gen/robust-uncertainty.ts` — Intra-repository dependency or independent status not conclusively verified.
-991. `server/services/cryptocrawl/optimization/nix-gen/scarcity-pricing.ts` — Intra-repository dependency or independent status not conclusively verified.
-992. `server/services/cryptocrawl/optimization/nix-gen/strategy-limb-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
-993. `server/services/cryptocrawl/optimization/nix-gen/terminal-calibration.ts` — Intra-repository dependency or independent status not conclusively verified.
-994. `server/services/cryptocrawl/optimization/nix-gen/types.ts` — Intra-repository dependency or independent status not conclusively verified.
-995. `server/services/cryptocrawl/optimization/nix-gen/zero-capital-ordering.ts` — Intra-repository dependency or independent status not conclusively verified.
-996. `server/services/cryptocrawl/optimization/opportunity-decay-model.ts` — Intra-repository dependency or independent status not conclusively verified.
-997. `server/services/cryptocrawl/optimization/profitability-score.ts` — Intra-repository dependency or independent status not conclusively verified.
-998. `server/services/cryptocrawl/optimization/research-bps-execution-tactics.ts` — Intra-repository dependency or independent status not conclusively verified.
-999. `server/services/cryptocrawl/optimization/unified-multileg-arbitrage-engine.ts` — Imports code outside the trading candidate set.
-1000. `server/services/cryptocrawl/optimization/universal-fee-overcompensation-engine.ts` — Imports code outside the trading candidate set.
-1001. `server/services/cryptocrawl/optimization/zero-capital-composite-evidence-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
-1002. `server/services/cryptocrawl/optimization/zero-capital-provider-cost-curve.ts` — Referenced by an existing runtime/build/verification entrypoint.
-1003. `server/services/cryptocrawl/optimization/zero-capital-route-evidence-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
-1004. `server/services/cryptocrawl/rate-limiting/automatic-rate-limiter.ts` — Imports code outside the trading candidate set.
-1005. `server/services/cryptocrawl/rate-limiting/index.ts` — Intra-repository dependency or independent status not conclusively verified.
-1006. `server/services/cryptocrawl/risk/circuit-breaker.ts` — External code/configuration/document reference remains.
-1007. `server/services/cryptocrawl/risk/kelly-criterion.ts` — Imports code outside the trading candidate set.
-1008. `server/services/cryptocrawl/risk/mandatory-risk-shield.ts` — External code/configuration/document reference remains.
-1009. `server/services/cryptocrawl/risk/progressive-position-sizing.ts` — Referenced by an existing runtime/build/verification entrypoint.
-1010. `server/services/cryptocrawl/runtime/adaptive-profit-operations-wiring.ts` — Imports code outside the trading candidate set.
-1011. `server/services/cryptocrawl/runtime/alchemy-filtered-mempool-wiring.ts` — Imports code outside the trading candidate set.
-1012. `server/services/cryptocrawl/runtime/alchemy-standard-rpc-first-wiring.ts` — Imports code outside the trading candidate set.
-1013. `server/services/cryptocrawl/runtime/coinbase-readiness-wiring.ts` — Imports code outside the trading candidate set.
-1014. `server/services/cryptocrawl/runtime/coincap-environment-wiring.ts` — Imports code outside the trading candidate set.
-1015. `server/services/cryptocrawl/runtime/core-runtime-lifecycle.ts` — Intra-repository dependency or independent status not conclusively verified.
-1016. `server/services/cryptocrawl/runtime/core-runtime.ts` — Imports code outside the trading candidate set.
-1017. `server/services/cryptocrawl/runtime/cryptocrawl-overflow-runtime-schema.ts` — Imports code outside the trading candidate set.
-1018. `server/services/cryptocrawl/runtime/cryptocrawl-runtime-database.ts` — Referenced/imported from outside the trading candidate set.
-1019. `server/services/cryptocrawl/runtime/database-coordination.ts` — Imports code outside the trading candidate set.
-1020. `server/services/cryptocrawl/runtime/discovery-work-context.ts` — Intra-repository dependency or independent status not conclusively verified.
-1021. `server/services/cryptocrawl/runtime/dynamic-rpc-provider-wiring.ts` — Imports code outside the trading candidate set.
-1022. `server/services/cryptocrawl/runtime/end-to-end-latency-harness.ts` — Imports code outside the trading candidate set.
-1023. `server/services/cryptocrawl/runtime/environment-contract.ts` — Intra-repository dependency or independent status not conclusively verified.
-1024. `server/services/cryptocrawl/runtime/expanded-market-universe-wiring.ts` — Imports code outside the trading candidate set.
-1025. `server/services/cryptocrawl/runtime/expanded-network-observability.ts` — Imports code outside the trading candidate set.
-1026. `server/services/cryptocrawl/runtime/hybrid-cex-execution-wiring.ts` — Imports code outside the trading candidate set.
-1027. `server/services/cryptocrawl/runtime/low-latency-execution-wiring.ts` — Imports code outside the trading candidate set.
-1028. `server/services/cryptocrawl/runtime/manual-power-state.ts` — Referenced/imported from outside the trading candidate set.
-1029. `server/services/cryptocrawl/runtime/market-focus-wiring.ts` — Imports code outside the trading candidate set.
-1030. `server/services/cryptocrawl/runtime/no-bps-maker-admission-wiring.ts` — Imports code outside the trading candidate set.
-1031. `server/services/cryptocrawl/runtime/performance-evidence-contract.ts` — Intra-repository dependency or independent status not conclusively verified.
-1032. `server/services/cryptocrawl/runtime/positive-profit-capture-wiring.ts` — Imports code outside the trading candidate set.
-1033. `server/services/cryptocrawl/runtime/rainbow-profit-bridge-wiring.ts` — Imports code outside the trading candidate set.
-1034. `server/services/cryptocrawl/runtime/readiness-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
-1035. `server/services/cryptocrawl/runtime/rpc-fallback-admission-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
-1036. `server/services/cryptocrawl/runtime/rpc-request-coalescer.ts` — Intra-repository dependency or independent status not conclusively verified.
-1037. `server/services/cryptocrawl/runtime/runtime-attestation.ts` — Intra-repository dependency or independent status not conclusively verified.
-1038. `server/services/cryptocrawl/runtime/runtime-invariant-monitor.ts` — Imports code outside the trading candidate set.
-1039. `server/services/cryptocrawl/runtime/stablecoin-maker-execution-wiring.ts` — Imports code outside the trading candidate set.
-1040. `server/services/cryptocrawl/runtime/stage-proof-metrics-wiring.ts` — Imports code outside the trading candidate set.
-1041. `server/services/cryptocrawl/runtime/system-capital-placement-wiring.ts` — Imports code outside the trading candidate set.
-1042. `server/services/cryptocrawl/runtime/system-capital-provenance.ts` — Intra-repository dependency or independent status not conclusively verified.
-1043. `server/services/cryptocrawl/runtime/system-owned-gas-funding-proof-wiring.ts` — Intra-repository dependency or independent status not conclusively verified.
-1044. `server/services/cryptocrawl/runtime/system-owned-native-zero-capital-execution-wiring.ts` — Imports code outside the trading candidate set.
-1045. `server/services/cryptocrawl/runtime/terminal-treasury-lifecycle.ts` — Imports code outside the trading candidate set.
-1046. `server/services/cryptocrawl/runtime/zero-capital-gas-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
-1047. `server/services/cryptocrawl/runtime/zero-capital-network-capability-registry.ts` — Imports code outside the trading candidate set.
-1048. `server/services/cryptocrawl/runtime/zero-capital-realized-profit-wiring.ts` — Imports code outside the trading candidate set.
-1049. `server/services/cryptocrawl/scaling/dynamic-scale-physics.ts` — Imports code outside the trading candidate set.
-1050. `server/services/cryptocrawl/scaling/dynamic-scale-pressure-wiring.ts` — Imports code outside the trading candidate set.
-1051. `server/services/cryptocrawl/scaling/dynamic-scale-profile-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
-1052. `server/services/cryptocrawl/scanner/realtime-stream.ts` — Imports code outside the trading candidate set.
-1053. `server/services/cryptocrawl/scanners/IMPLEMENTATION_SUMMARY.md` — Documentation; retain pending fuller transfer.
-1054. `server/services/cryptocrawl/scanners/SECURITY_SUMMARY.md` — Documentation; retain pending fuller transfer.
-1055. `server/services/cryptocrawl/SECURITY_SUMMARY.md` — Documentation; retain pending fuller transfer.
-1056. `server/services/cryptocrawl/stealth/async-mutex.ts` — Intra-repository dependency or independent status not conclusively verified.
-1057. `server/services/cryptocrawl/stealth/circuit-breaker.ts` — External code/configuration/document reference remains.
-1058. `server/services/cryptocrawl/stealth/continuous-learning-system.ts` — Intra-repository dependency or independent status not conclusively verified.
-1059. `server/services/cryptocrawl/stealth/dynamic-scale-physics.ts` — Intra-repository dependency or independent status not conclusively verified.
-1060. `server/services/cryptocrawl/stealth/operational-integrity.ts` — Intra-repository dependency or independent status not conclusively verified.
-1061. `server/services/cryptocrawl/stealth/types.ts` — Intra-repository dependency or independent status not conclusively verified.
-1062. `server/services/cryptocrawl/stealth/ultra-low-latency-executor.ts` — Intra-repository dependency or independent status not conclusively verified.
-1063. `server/services/cryptocrawl/strategies/adaptive-ensemble-engine.ts` — Imports code outside the trading candidate set.
-1064. `server/services/cryptocrawl/strategies/advanced-arbitrage.ts` — Intra-repository dependency or independent status not conclusively verified.
-1065. `server/services/cryptocrawl/strategies/disco-ball-mirror.ts` — Intra-repository dependency or independent status not conclusively verified.
-1066. `server/services/cryptocrawl/strategies/gas-sponsorship.ts` — Intra-repository dependency or independent status not conclusively verified.
-1067. `server/services/cryptocrawl/strategies/snipe-strategy.ts` — Intra-repository dependency or independent status not conclusively verified.
-1068. `server/services/cryptocrawl/testing/cryptocrawler-test-harness.ts` — Imports code outside the trading candidate set.
-1069. `server/services/cryptocrawl/testing/extreme-scenario-tests.ts` — Imports code outside the trading candidate set.
-1070. `server/services/cryptocrawl/testing/index.ts` — Intra-repository dependency or independent status not conclusively verified.
-1071. `server/services/cryptocrawl/testing/live-market-dry-run.ts` — Imports code outside the trading candidate set.
-1072. `server/services/cryptocrawl/testing/run-1500-target-optimization.ts` — Intra-repository dependency or independent status not conclusively verified.
-1073. `server/services/cryptocrawl/testing/run-arbitrage-live-cycles.ts` — Intra-repository dependency or independent status not conclusively verified.
-1074. `server/services/cryptocrawl/testing/run-extreme-tests.ts` — Intra-repository dependency or independent status not conclusively verified.
-1075. `server/services/cryptocrawl/testing/run-profit-optimization.ts` — Intra-repository dependency or independent status not conclusively verified.
-1076. `server/services/cryptocrawl/testing/run-testnet-monte-carlo.ts` — Imports code outside the trading candidate set.
-1077. `server/services/cryptocrawl/testing/run-tests.ts` — Intra-repository dependency or independent status not conclusively verified.
-1078. `server/services/cryptocrawl/testing/verify-all-chains.ts` — Intra-repository dependency or independent status not conclusively verified.
-1079. `server/services/cryptocrawl/testing/verify-aries-vault.ts` — Intra-repository dependency or independent status not conclusively verified.
-1080. `server/services/cryptocrawl/testing/verify-automatic-native-gas-plan.ts` — Intra-repository dependency or independent status not conclusively verified.
-1081. `server/services/cryptocrawl/testing/verify-autonomous-stage-progression.ts` — Intra-repository dependency or independent status not conclusively verified.
-1082. `server/services/cryptocrawl/testing/verify-capital-hierarchy.ts` — Intra-repository dependency or independent status not conclusively verified.
-1083. `server/services/cryptocrawl/testing/verify-live-price-failover.ts` — Intra-repository dependency or independent status not conclusively verified.
-1084. `server/services/cryptocrawl/testing/verify-native-gas-funding-coordinator.ts` — Intra-repository dependency or independent status not conclusively verified.
-1085. `server/services/cryptocrawl/testing/verify-provider-failover.ts` — Intra-repository dependency or independent status not conclusively verified.
-1086. `server/services/cryptocrawl/testing/verify-settlement-lifecycle.ts` — Intra-repository dependency or independent status not conclusively verified.
-1087. `server/services/cryptocrawl/testing/verify-wallet-assets.ts` — Intra-repository dependency or independent status not conclusively verified.
-1088. `server/services/cryptocrawl/training/index.ts` — Referenced by an existing runtime/build/verification entrypoint.
-1089. `server/services/cryptocrawl/training/scheduled-monte-carlo-training.ts` — Imports code outside the trading candidate set.
-1090. `server/services/cryptocrawl/ui/dashboard-client.js` — Intra-repository dependency or independent status not conclusively verified.
-1091. `server/services/cryptocrawl/ui/dashboard.html` — Intra-repository dependency or independent status not conclusively verified.
-1092. `server/services/cryptocrawl/ui/README.md` — Documentation; retain pending fuller transfer.
-1093. `server/services/cryptocrawl/utils/resilient-http.ts` — Intra-repository dependency or independent status not conclusively verified.
-1094. `server/services/cryptocrawl/validate-swarm.ts` — Intra-repository dependency or independent status not conclusively verified.
-1095. `server/services/cryptocrawl/validation/index.ts` — Intra-repository dependency or independent status not conclusively verified.
-1096. `server/services/cryptocrawl/validation/monte-carlo-calibration-store.ts` — Imports code outside the trading candidate set.
-1097. `server/services/cryptocrawl/validation/monte-carlo-engine.ts` — Imports code outside the trading candidate set.
-1098. `server/services/cryptocrawl/validation/monte-carlo-hyper-engine.ts` — Intra-repository dependency or independent status not conclusively verified.
-1099. `server/services/cryptocrawl/validation/monte-carlo-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
-1100. `server/services/cryptocrawl/validation/multi-oracle-validator.ts` — Imports code outside the trading candidate set.
-1101. `server/services/cryptocrawl/validation/order-book-evolution-store.ts` — Intra-repository dependency or independent status not conclusively verified.
-1102. `server/services/cryptocrawl/validation/runtime-confidence-bootstrap.ts` — Intra-repository dependency or independent status not conclusively verified.
-1103. `server/services/cryptocrawl/validation/verify-hyper-quanti-admission.ts` — Intra-repository dependency or independent status not conclusively verified.
-1104. `server/services/cryptocrawl/validation/verify-hyper-shared-data-fabric.ts` — Intra-repository dependency or independent status not conclusively verified.
-1105. `server/services/cryptocrawl/verification/canonicalCryptoVerifier.ts` — Referenced/imported from outside the trading candidate set.
-1106. `server/services/cryptocrawl/wallet/.wallet.enc.json` — Sensitive wallet/credentials: not eligible for public transfer.
-1107. `server/services/cryptocrawl/wallet/wallet-generator.ts` — Sensitive wallet/credentials: not eligible for public transfer.
-1108. `server/services/geoconsole/monteCarloPathEngine.ts` — LegalWhat component or ambiguous shared naming.
-1109. `server/services/inmateSearch/__tests__/MonteCarloInmateTest.ts` — LegalWhat component or ambiguous shared naming.
-1110. `server/services/monteCarlo/EvolutionaryCycleEngine.ts` — Imports code outside the trading candidate set.
-1111. `server/services/monteCarlo/index.ts` — Referenced/imported from outside the trading candidate set.
-1112. `server/services/monteCarlo/MonteCarloConfig.ts` — Intra-repository dependency or independent status not conclusively verified.
-1113. `server/services/monteCarlo/MonteCarloCrawlerOptimizer.ts` — Imports code outside the trading candidate set.
-1114. `server/services/monteCarlo/MonteCarloEngine.ts` — Intra-repository dependency or independent status not conclusively verified.
-1115. `server/services/peopleSearch/router/__tests__/MonteCarloEngine.test.ts` — LegalWhat component or ambiguous shared naming.
-1116. `server/services/peopleSearch/router/MonteCarloEngine.ts` — LegalWhat component or ambiguous shared naming.
-1117. `server/services/quantiComp/adaptiveOptimizer.ts` — Intra-repository dependency or independent status not conclusively verified.
-1118. `server/services/quantiComp/adaptiveRuntime.ts` — Intra-repository dependency or independent status not conclusively verified.
-1119. `server/services/quantiComp/backendRegistry.ts` — Intra-repository dependency or independent status not conclusively verified.
-1120. `server/services/quantiComp/backendRuntime.ts` — Intra-repository dependency or independent status not conclusively verified.
-1121. `server/services/quantiComp/dataFabric.ts` — Intra-repository dependency or independent status not conclusively verified.
-1122. `server/services/quantiComp/index.ts` — Intra-repository dependency or independent status not conclusively verified.
-1123. `server/services/quantiComp/interactionModel.ts` — Intra-repository dependency or independent status not conclusively verified.
-1124. `server/services/quantiComp/parallelismGovernor.ts` — Intra-repository dependency or independent status not conclusively verified.
-1125. `server/services/quantiComp/resourceProfiler.ts` — Intra-repository dependency or independent status not conclusively verified.
-1126. `server/services/quantiComp/runtime.ts` — Intra-repository dependency or independent status not conclusively verified.
-1127. `server/services/quantiComp/testing/verify-quanti-adaptive.ts` — Intra-repository dependency or independent status not conclusively verified.
-1128. `server/services/quantiComp/testing/verify-quanti-backends.ts` — Intra-repository dependency or independent status not conclusively verified.
-1129. `server/services/quantiComp/testing/verify-quanti-comp.ts` — Intra-repository dependency or independent status not conclusively verified.
-1130. `server/services/quantiComp/testing/verify-quanti-data-fabric.ts` — Intra-repository dependency or independent status not conclusively verified.
-1131. `server/services/quantiComp/testing/verify-quanti-parallelism.ts` — Intra-repository dependency or independent status not conclusively verified.
-1132. `server/services/quantiComp/types.ts` — Intra-repository dependency or independent status not conclusively verified.
-1133. `services/cryptocrawler-executor/index.ts` — Imports code outside the trading candidate set.
-1134. `supabase/functions/cryptocrawler-terminal-sweeper/index.ts` — Database migration or service; integration not proven independent.
-1135. `supabase/functions/cryptocrawler-terminal-sweeper/okx.ts` — Database migration or service; integration not proven independent.
-1136. `supabase/functions/cryptocrawler-terminal-sweeper/payouts.ts` — Database migration or service; integration not proven independent.
-1137. `supabase/functions/cryptocrawler-terminal-sweeper/shared.ts` — Database migration or service; integration not proven independent.
-1138. `supabase/functions/cryptocrawler-terminal-sweeper/terminal.ts` — Database migration or service; integration not proven independent.
+371. `server/services/computationalBeam/comprehensive-validate.ts` — Reads retained computational Beam source files dynamically (main.ts, index.ts and README.md); must remain in Bad-Blue.
+372. `server/services/computationalBeam/credentialValidator.ts` — Intra-repository dependency or independent status not conclusively verified.
+373. `server/services/computationalBeam/cryptocrawlerConnector.ts` — Imports code outside the trading candidate set.
+374. `server/services/computationalBeam/dashboardOptimizer.ts` — Imports code outside the trading candidate set.
+375. `server/services/computationalBeam/demo.ts` — Intra-repository dependency or independent status not conclusively verified.
+376. `server/services/computationalBeam/directionalBeamLayer.ts` — Intra-repository dependency or independent status not conclusively verified.
+377. `server/services/computationalBeam/HYPER_OPTIMIZATION_STRATEGY.md` — Documentation; retain pending fuller transfer.
+378. `server/services/computationalBeam/index.ts` — Referenced by an existing runtime/build/verification entrypoint.
+379. `server/services/computationalBeam/integrityTesting.ts` — Referenced by an existing runtime/build/verification entrypoint.
+380. `server/services/computationalBeam/main.ts` — Intra-repository dependency or independent status not conclusively verified.
+381. `server/services/computationalBeam/metricsAnalytics.ts` — Referenced by an existing runtime/build/verification entrypoint.
+382. `server/services/computationalBeam/neuralLoadPredictor.ts` — Referenced by an existing runtime/build/verification entrypoint.
+383. `server/services/computationalBeam/omniAntennaLayer.ts` — Intra-repository dependency or independent status not conclusively verified.
+384. `server/services/computationalBeam/pantheonConnector.ts` — Imports code outside the trading candidate set.
+385. `server/services/computationalBeam/peopleFinderConnector.ts` — Imports code outside the trading candidate set.
+386. `server/services/computationalBeam/README.md` — Documentation; retain pending fuller transfer.
+387. `server/services/computationalBeam/safetyRules.ts` — Intra-repository dependency or independent status not conclusively verified.
+388. `server/services/computationalBeam/skale-pow-worker.cjs` — Intra-repository dependency or independent status not conclusively verified.
+389. `server/services/computationalBeam/skalePowWorkloadAdapter.ts` — Referenced by an existing runtime/build/verification entrypoint.
+390. `server/services/computationalBeam/superBatteryLayer.ts` — Intra-repository dependency or independent status not conclusively verified.
+391. `server/services/computationalBeam/testing/verify-beam-workloads.ts` — Intra-repository dependency or independent status not conclusively verified.
+392. `server/services/computationalBeam/types.ts` — Intra-repository dependency or independent status not conclusively verified.
+393. `server/services/computationalBeam/validate.ts` — Intra-repository dependency or independent status not conclusively verified.
+394. `server/services/computationalBeam/walletOptimizer.ts` — Imports code outside the trading candidate set.
+395. `server/services/computationalBeam/webSearchIntegration.ts` — Imports code outside the trading candidate set.
+396. `server/services/computationalBeam/workloadRouter.ts` — Intra-repository dependency or independent status not conclusively verified.
+397. `server/services/cryptara/index.ts` — Referenced/imported from outside the trading candidate set.
+398. `server/services/cryptara/marketGates/engine.ts` — Intra-repository dependency or independent status not conclusively verified.
+399. `server/services/cryptara/marketGates/index.ts` — Intra-repository dependency or independent status not conclusively verified.
+400. `server/services/cryptara/marketGates/types.ts` — Intra-repository dependency or independent status not conclusively verified.
+401. `server/services/cryptara/network-specialization-learning.ts` — Intra-repository dependency or independent status not conclusively verified.
+402. `server/services/cryptara/opportunity-ml-ranker.ts` — Intra-repository dependency or independent status not conclusively verified.
+403. `server/services/cryptara/zero-capital-funding-learning.ts` — Intra-repository dependency or independent status not conclusively verified.
+404. `server/services/cryptocrawl/agents/cain-crawler.ts` — Intra-repository dependency or independent status not conclusively verified.
+405. `server/services/cryptocrawl/agents/cain-twin-hybrid.ts` — Imports code outside the trading candidate set.
+406. `server/services/cryptocrawl/agents/conjoined-twin-crawler.ts` — Imports code outside the trading candidate set.
+407. `server/services/cryptocrawl/agents/enhanced-micro-crawler.ts` — Intra-repository dependency or independent status not conclusively verified.
+408. `server/services/cryptocrawl/agents/index.ts` — Intra-repository dependency or independent status not conclusively verified.
+409. `server/services/cryptocrawl/agents/starburst-replication.ts` — Imports code outside the trading candidate set.
+410. `server/services/cryptocrawl/agents/starburst-snake.ts` — Referenced/imported from outside the trading candidate set.
+411. `server/services/cryptocrawl/agents/swarm-orchestrator.ts` — Imports code outside the trading candidate set.
+412. `server/services/cryptocrawl/ai/cryptocrawler-ai-harmony.ts` — Imports code outside the trading candidate set.
+413. `server/services/cryptocrawl/ai/index.ts` — Referenced by an existing runtime/build/verification entrypoint.
+414. `server/services/cryptocrawl/api/admin-api.ts` — Referenced/imported from outside the trading candidate set.
+415. `server/services/cryptocrawl/api/blockchain-providers.ts` — Imports code outside the trading candidate set.
+416. `server/services/cryptocrawl/api/bridge-api.ts` — Referenced/imported from outside the trading candidate set.
+417. `server/services/cryptocrawl/api/canonical-dashboard-api.ts` — Intra-repository dependency or independent status not conclusively verified.
+418. `server/services/cryptocrawl/api/dashboard-api.ts` — Intra-repository dependency or independent status not conclusively verified.
+419. `server/services/cryptocrawl/api/index.ts` — Referenced/imported from outside the trading candidate set.
+420. `server/services/cryptocrawl/api/truthful-admin-diagnostics.ts` — Imports code outside the trading candidate set.
+421. `server/services/cryptocrawl/arbitrage/arbitrage-verifier.ts` — Imports code outside the trading candidate set.
+422. `server/services/cryptocrawl/babel/cain-reasoning.ts` — Imports code outside the trading candidate set.
+423. `server/services/cryptocrawl/babel/crawler-fingerprint.ts` — Imports code outside the trading candidate set.
+424. `server/services/cryptocrawl/babel/index.ts` — Intra-repository dependency or independent status not conclusively verified.
+425. `server/services/cryptocrawl/babel/light-language.ts` — Imports code outside the trading candidate set.
+426. `server/services/cryptocrawl/babel/tower-of-babel.ts` — Imports code outside the trading candidate set.
+427. `server/services/cryptocrawl/babel/tradingview-integration.ts` — Imports code outside the trading candidate set.
+428. `server/services/cryptocrawl/beam/beam.ts` — Imports code outside the trading candidate set.
+429. `server/services/cryptocrawl/beam/beamRoutes.ts` — Referenced/imported from outside the trading candidate set.
+430. `server/services/cryptocrawl/bridge/across-approval-gas-evidence.ts` — Intra-repository dependency or independent status not conclusively verified.
+431. `server/services/cryptocrawl/bridge/across-bridge-provider.ts` — Intra-repository dependency or independent status not conclusively verified.
+432. `server/services/cryptocrawl/bridge/across-terminal-amount-evidence.ts` — Intra-repository dependency or independent status not conclusively verified.
+433. `server/services/cryptocrawl/bridge/balance-monitor.ts` — Intra-repository dependency or independent status not conclusively verified.
+434. `server/services/cryptocrawl/bridge/chain-config.ts` — Referenced/imported from outside the trading candidate set.
+435. `server/services/cryptocrawl/bridge/coingecko-client.ts` — Intra-repository dependency or independent status not conclusively verified.
+436. `server/services/cryptocrawl/bridge/gas-oracle.ts` — Intra-repository dependency or independent status not conclusively verified.
+437. `server/services/cryptocrawl/bridge/index.ts` — Intra-repository dependency or independent status not conclusively verified.
+438. `server/services/cryptocrawl/bridge/live-price-mesh.ts` — Intra-repository dependency or independent status not conclusively verified.
+439. `server/services/cryptocrawl/bridge/network-health.ts` — Intra-repository dependency or independent status not conclusively verified.
+440. `server/services/cryptocrawl/bridge/position-recommender.ts` — Intra-repository dependency or independent status not conclusively verified.
+441. `server/services/cryptocrawl/bridge/route-optimizer.ts` — Intra-repository dependency or independent status not conclusively verified.
+442. `server/services/cryptocrawl/bridge/types.ts` — Intra-repository dependency or independent status not conclusively verified.
+443. `server/services/cryptocrawl/bridge/withdraw-deposit.ts` — Intra-repository dependency or independent status not conclusively verified.
+444. `server/services/cryptocrawl/CANONICAL_AUTHORITIES.md` — Documentation; retain pending fuller transfer.
+445. `server/services/cryptocrawl/capital-free/alchemy-filtered-mempool.ts` — Intra-repository dependency or independent status not conclusively verified.
+446. `server/services/cryptocrawl/capital-free/alchemy-filtered-pending-stream.ts` — Intra-repository dependency or independent status not conclusively verified.
+447. `server/services/cryptocrawl/capital-free/alchemy-integration.ts` — Imports code outside the trading candidate set.
+448. `server/services/cryptocrawl/capital-free/autonomous-optimizer.ts` — Imports code outside the trading candidate set.
+449. `server/services/cryptocrawl/capital-free/barter-system.ts` — Imports code outside the trading candidate set.
+450. `server/services/cryptocrawl/capital-free/dynamic-gas-funding-engine.ts` — Intra-repository dependency or independent status not conclusively verified.
+451. `server/services/cryptocrawl/capital-free/eden-placement-strategy.ts` — Imports code outside the trading candidate set.
+452. `server/services/cryptocrawl/capital-free/flash-liquidity-layer.ts` — Imports code outside the trading candidate set.
+453. `server/services/cryptocrawl/capital-free/gas-acquisition-system.ts` — Imports code outside the trading candidate set.
+454. `server/services/cryptocrawl/capital-free/index.ts` — Referenced by an existing runtime/build/verification entrypoint.
+455. `server/services/cryptocrawl/capital-free/nexgen-protocol-layer.ts` — Imports code outside the trading candidate set.
+456. `server/services/cryptocrawl/capital-free/partnership-formation.ts` — Imports code outside the trading candidate set.
+457. `server/services/cryptocrawl/capital-free/pending-swap-route-decoder.ts` — Intra-repository dependency or independent status not conclusively verified.
+458. `server/services/cryptocrawl/capital-free/provider-mesh-mempool-analysis.ts` — Imports code outside the trading candidate set.
+459. `server/services/cryptocrawl/capital-free/provider-mesh-pending-stream.ts` — Imports code outside the trading candidate set.
+460. `server/services/cryptocrawl/capital-free/starburst-scaling.ts` — Imports code outside the trading candidate set.
+461. `server/services/cryptocrawl/capital-free/superchain-integration.ts` — Imports code outside the trading candidate set.
+462. `server/services/cryptocrawl/compensation/compensationEngine.ts` — Imports code outside the trading candidate set.
+463. `server/services/cryptocrawl/compensation/compensationGuarantee.ts` — Referenced/imported from outside the trading candidate set.
+464. `server/services/cryptocrawl/compensation/demo.ts` — Intra-repository dependency or independent status not conclusively verified.
+465. `server/services/cryptocrawl/compensation/hyper-hybrid-partial-profit-accounting.ts` — Imports code outside the trading candidate set.
+466. `server/services/cryptocrawl/compensation/index.ts` — Intra-repository dependency or independent status not conclusively verified.
+467. `server/services/cryptocrawl/compensation/payout-recipient-confirmation-observer.ts` — Imports code outside the trading candidate set.
+468. `server/services/cryptocrawl/compensation/payoutScheduler.ts` — Imports code outside the trading candidate set.
+469. `server/services/cryptocrawl/compensation/rainbow-maker-fuel-reserve.ts` — Imports code outside the trading candidate set.
+470. `server/services/cryptocrawl/compensation/rainbow-profit-bridge.ts` — Imports code outside the trading candidate set.
+471. `server/services/cryptocrawl/compensation/rainbow-profit-observability.ts` — Imports code outside the trading candidate set.
+472. `server/services/cryptocrawl/compensation/rainbow-profit-source-ledger.ts` — Intra-repository dependency or independent status not conclusively verified.
+473. `server/services/cryptocrawl/compensation/README.md` — Documentation; retain pending fuller transfer.
+474. `server/services/cryptocrawl/compensation/retained-profit-ledger.ts` — Imports code outside the trading candidate set.
+475. `server/services/cryptocrawl/compensation/revenueStreams.ts` — Imports code outside the trading candidate set.
+476. `server/services/cryptocrawl/compensation/types.ts` — Intra-repository dependency or independent status not conclusively verified.
+477. `server/services/cryptocrawl/compensation/walletVerification.ts` — Imports code outside the trading candidate set.
+478. `server/services/cryptocrawl/config/chains.json` — Dynamically loaded by a retained CryptoCrawler module (server/services/cryptocrawl/core/wallet.ts).
+479. `server/services/cryptocrawl/config/maximum-profitability.ts` — Referenced by an existing runtime/build/verification entrypoint.
+480. `server/services/cryptocrawl/config/perChainRisk.ts` — Intra-repository dependency or independent status not conclusively verified.
+481. `server/services/cryptocrawl/config/testnet-chains.ts` — Intra-repository dependency or independent status not conclusively verified.
+482. `server/services/cryptocrawl/core/cain-crawler.ts` — Imports code outside the trading candidate set.
+483. `server/services/cryptocrawl/core/capital-hierarchy.ts` — Referenced by an existing runtime/build/verification entrypoint.
+484. `server/services/cryptocrawl/core/defensive-trading-mode.ts` — Imports code outside the trading candidate set.
+485. `server/services/cryptocrawl/core/distributedCompute.ts` — Imports code outside the trading candidate set.
+486. `server/services/cryptocrawl/core/dynamic-chain-registry.ts` — Imports code outside the trading candidate set.
+487. `server/services/cryptocrawl/core/eden-storage.ts` — Imports code outside the trading candidate set.
+488. `server/services/cryptocrawl/core/entry-signal-filter.ts` — Imports code outside the trading candidate set.
+489. `server/services/cryptocrawl/core/flashloan-atomic-engine.ts` — External code/configuration/document reference remains.
+490. `server/services/cryptocrawl/core/light-communication.ts` — Imports code outside the trading candidate set.
+491. `server/services/cryptocrawl/core/lux-swarm.ts` — Intra-repository dependency or independent status not conclusively verified.
+492. `server/services/cryptocrawl/core/market-condition-detector.ts` — Imports code outside the trading candidate set.
+493. `server/services/cryptocrawl/core/master-orchestrator.ts` — Imports code outside the trading candidate set.
+494. `server/services/cryptocrawl/core/microtask-engine.ts` — Imports code outside the trading candidate set.
+495. `server/services/cryptocrawl/core/neurofusion.ts` — Imports code outside the trading candidate set.
+496. `server/services/cryptocrawl/core/quantum-optimization-engine.ts` — Imports code outside the trading candidate set.
+497. `server/services/cryptocrawl/core/stealth-security.ts` — Imports code outside the trading candidate set.
+498. `server/services/cryptocrawl/core/wallet-identity.ts` — Intra-repository dependency or independent status not conclusively verified.
+499. `server/services/cryptocrawl/core/wallet.ts` — Intra-repository dependency or independent status not conclusively verified.
+500. `server/services/cryptocrawl/core/zero-capital-engine.ts` — Imports code outside the trading candidate set.
+501. `server/services/cryptocrawl/core/zero-capital-price-evidence.ts` — Intra-repository dependency or independent status not conclusively verified.
+502. `server/services/cryptocrawl/demo-capital-free.ts` — Intra-repository dependency or independent status not conclusively verified.
+503. `server/services/cryptocrawl/demo-swarm.ts` — Intra-repository dependency or independent status not conclusively verified.
+504. `server/services/cryptocrawl/discovery/candidate-publication-generation.ts` — Intra-repository dependency or independent status not conclusively verified.
+505. `server/services/cryptocrawl/discovery/cex-economic-barrier-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
+506. `server/services/cryptocrawl/discovery/cex-economic-barrier.ts` — Intra-repository dependency or independent status not conclusively verified.
+507. `server/services/cryptocrawl/discovery/cex-edge-attention.ts` — Intra-repository dependency or independent status not conclusively verified.
+508. `server/services/cryptocrawl/discovery/cex-fee-mode-observability.ts` — Intra-repository dependency or independent status not conclusively verified.
+509. `server/services/cryptocrawl/discovery/cex-observation-candidates.ts` — Intra-repository dependency or independent status not conclusively verified.
+510. `server/services/cryptocrawl/discovery/cex-residual-replan.ts` — Imports code outside the trading candidate set.
+511. `server/services/cryptocrawl/discovery/configured-zero-capital-gas-economics.ts` — Intra-repository dependency or independent status not conclusively verified.
+512. `server/services/cryptocrawl/discovery/cross-chain-opportunity-generator.ts` — Intra-repository dependency or independent status not conclusively verified.
+513. `server/services/cryptocrawl/discovery/cross-chain-route-economics.ts` — Intra-repository dependency or independent status not conclusively verified.
+514. `server/services/cryptocrawl/discovery/dex-opportunity-generator.ts` — Intra-repository dependency or independent status not conclusively verified.
+515. `server/services/cryptocrawl/discovery/dynamic-zero-capital-routes.ts` — Imports code outside the trading candidate set.
+516. `server/services/cryptocrawl/discovery/event-venue.ts` — Intra-repository dependency or independent status not conclusively verified.
+517. `server/services/cryptocrawl/discovery/funding-arbitrage-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
+518. `server/services/cryptocrawl/discovery/funding-rate-discovery.ts` — Imports code outside the trading candidate set.
+519. `server/services/cryptocrawl/discovery/funding-rate-monitor.ts` — Imports code outside the trading candidate set.
+520. `server/services/cryptocrawl/discovery/graphless-dex-scout.ts` — Imports code outside the trading candidate set.
+521. `server/services/cryptocrawl/discovery/kalshi-cross-venue-event-arbitrage.ts` — Imports code outside the trading candidate set.
+522. `server/services/cryptocrawl/discovery/kalshi-event-opportunity-generator.ts` — Imports code outside the trading candidate set.
+523. `server/services/cryptocrawl/discovery/liquidation-opportunity-generator.ts` — Imports code outside the trading candidate set.
+524. `server/services/cryptocrawl/discovery/maker-opportunity-generator.ts` — Intra-repository dependency or independent status not conclusively verified.
+525. `server/services/cryptocrawl/discovery/market-universe-controller.ts` — Intra-repository dependency or independent status not conclusively verified.
+526. `server/services/cryptocrawl/discovery/measured-candidate-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
+527. `server/services/cryptocrawl/discovery/mempool-capability-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
+528. `server/services/cryptocrawl/discovery/mempool-opportunity-generator.ts` — Intra-repository dependency or independent status not conclusively verified.
+529. `server/services/cryptocrawl/discovery/multi-topology-discovery-controller.ts` — Imports code outside the trading candidate set.
+530. `server/services/cryptocrawl/discovery/opportunity-graph.ts` — Imports code outside the trading candidate set.
+531. `server/services/cryptocrawl/discovery/polymarket-event-venue.ts` — Intra-repository dependency or independent status not conclusively verified.
+532. `server/services/cryptocrawl/discovery/prediction-market-opportunity-generator.ts` — Imports code outside the trading candidate set.
+533. `server/services/cryptocrawl/discovery/public-cex-discovery.ts` — Imports code outside the trading candidate set.
+534. `server/services/cryptocrawl/discovery/scan-capacity-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
+535. `server/services/cryptocrawl/discovery/stage-one-candidate-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
+536. `server/services/cryptocrawl/discovery/stage-one-dex-mempool-repair.ts` — Imports code outside the trading candidate set.
+537. `server/services/cryptocrawl/discovery/stage-one-dex-mempool-velora-recovery.ts` — Imports code outside the trading candidate set.
+538. `server/services/cryptocrawl/discovery/stage-one-measurement-recovery.ts` — Imports code outside the trading candidate set.
+539. `server/services/cryptocrawl/discovery/symbol-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
+540. `server/services/cryptocrawl/discovery/venue-capability-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
+541. `server/services/cryptocrawl/discovery/zero-capital-canonical-discovery.ts` — Imports code outside the trading candidate set.
+542. `server/services/cryptocrawl/discovery/zero-capital-route-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
+543. `server/services/cryptocrawl/discovery/zero-capital-route-preselection.ts` — Intra-repository dependency or independent status not conclusively verified.
+544. `server/services/cryptocrawl/eden/config.ts` — Intra-repository dependency or independent status not conclusively verified.
+545. `server/services/cryptocrawl/eden/deployment.ts` — Imports code outside the trading candidate set.
+546. `server/services/cryptocrawl/eden/index.ts` — Intra-repository dependency or independent status not conclusively verified.
+547. `server/services/cryptocrawl/eden/schema.ts` — Intra-repository dependency or independent status not conclusively verified.
+548. `server/services/cryptocrawl/eden/service.ts` — Referenced by an existing runtime/build/verification entrypoint.
+549. `server/services/cryptocrawl/eden/types.ts` — Referenced by an existing runtime/build/verification entrypoint.
+550. `server/services/cryptocrawl/evolution/frontier-research-integration.ts` — Imports code outside the trading candidate set.
+551. `server/services/cryptocrawl/evolution/hyper-evolution-engine.ts` — Imports code outside the trading candidate set.
+552. `server/services/cryptocrawl/evolution/index.ts` — Referenced by an existing runtime/build/verification entrypoint.
+553. `server/services/cryptocrawl/evolution/measured-execution-feedback.ts` — Imports code outside the trading candidate set.
+554. `server/services/cryptocrawl/evolution/swarm-intelligence.ts` — Imports code outside the trading candidate set.
+555. `server/services/cryptocrawl/evolution/terminal-network-funding-learning.ts` — Intra-repository dependency or independent status not conclusively verified.
+556. `server/services/cryptocrawl/evolution/zero-capital-funding-lifecycle-observer.ts` — Intra-repository dependency or independent status not conclusively verified.
+557. `server/services/cryptocrawl/execution/aave-liquidation-atomic-executor.ts` — Imports code outside the trading candidate set.
+558. `server/services/cryptocrawl/execution/across-bridge-executor.ts` — Imports code outside the trading candidate set.
+559. `server/services/cryptocrawl/execution/across-prebroadcast-durability.ts` — Imports code outside the trading candidate set.
+560. `server/services/cryptocrawl/execution/adapters/atomic-size-optimizer.ts` — Intra-repository dependency or independent status not conclusively verified.
+561. `server/services/cryptocrawl/execution/adapters/autonomous-route-planner.ts` — Intra-repository dependency or independent status not conclusively verified.
+562. `server/services/cryptocrawl/execution/adapters/bootstrap-recovery-state.ts` — Referenced by an existing runtime/build/verification entrypoint.
+563. `server/services/cryptocrawl/execution/adapters/builder-repayment-route.ts` — Intra-repository dependency or independent status not conclusively verified.
+564. `server/services/cryptocrawl/execution/adapters/builder-sequential-gas-simulator.ts` — Intra-repository dependency or independent status not conclusively verified.
+565. `server/services/cryptocrawl/execution/adapters/builder-sponsored-bundle.ts` — Imports code outside the trading candidate set.
+566. `server/services/cryptocrawl/execution/adapters/composite-flashloan-receiver-builder.ts` — Intra-repository dependency or independent status not conclusively verified.
+567. `server/services/cryptocrawl/execution/adapters/composite-route-measurement-planner.ts` — Intra-repository dependency or independent status not conclusively verified.
+568. `server/services/cryptocrawl/execution/adapters/dual-flash-loan-provider-mesh.ts` — Intra-repository dependency or independent status not conclusively verified.
+569. `server/services/cryptocrawl/execution/adapters/dual-flash-loan-provider-selection-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
+570. `server/services/cryptocrawl/execution/adapters/dual-flashloan-receiver-bootstrap.ts` — Intra-repository dependency or independent status not conclusively verified.
+571. `server/services/cryptocrawl/execution/adapters/dual-flashloan-receiver-builder.ts` — Intra-repository dependency or independent status not conclusively verified.
+572. `server/services/cryptocrawl/execution/adapters/dual-flashloan-receiver-capability.ts` — Intra-repository dependency or independent status not conclusively verified.
+573. `server/services/cryptocrawl/execution/adapters/europa-dynamic-route-discovery.ts` — Referenced by an existing runtime/build/verification entrypoint.
+574. `server/services/cryptocrawl/execution/adapters/europa-network.ts` — Intra-repository dependency or independent status not conclusively verified.
+575. `server/services/cryptocrawl/execution/adapters/europa-sushi-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
+576. `server/services/cryptocrawl/execution/adapters/europa-sushi-v3-flash-builder.ts` — Intra-repository dependency or independent status not conclusively verified.
+577. `server/services/cryptocrawl/execution/adapters/europa-zero-gas-adapter.ts` — Referenced by an existing runtime/build/verification entrypoint.
+578. `server/services/cryptocrawl/execution/adapters/flash-loan-demand-hint.ts` — Intra-repository dependency or independent status not conclusively verified.
+579. `server/services/cryptocrawl/execution/adapters/flash-loan-provider-economics.ts` — Intra-repository dependency or independent status not conclusively verified.
+580. `server/services/cryptocrawl/execution/adapters/flash-loan-provider-selection-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
+581. `server/services/cryptocrawl/execution/adapters/flash-loan-receiver-capability.ts` — Intra-repository dependency or independent status not conclusively verified.
+582. `server/services/cryptocrawl/execution/adapters/flashbots-auth-identity.ts` — Intra-repository dependency or independent status not conclusively verified.
+583. `server/services/cryptocrawl/execution/adapters/flashloan-receiver-builder.ts` — Intra-repository dependency or independent status not conclusively verified.
+584. `server/services/cryptocrawl/execution/adapters/monte-carlo-profitability.ts` — Intra-repository dependency or independent status not conclusively verified.
+585. `server/services/cryptocrawl/execution/adapters/monte-carlo-worker.ts` — Intra-repository dependency or independent status not conclusively verified.
+586. `server/services/cryptocrawl/execution/adapters/onchain-payload-builder.ts` — Intra-repository dependency or independent status not conclusively verified.
+587. `server/services/cryptocrawl/execution/adapters/onchain-route-quoter.ts` — Intra-repository dependency or independent status not conclusively verified.
+588. `server/services/cryptocrawl/execution/adapters/parallel-monte-carlo-pool.ts` — Intra-repository dependency or independent status not conclusively verified.
+589. `server/services/cryptocrawl/execution/adapters/primary-market-anchor-adapter.ts` — Intra-repository dependency or independent status not conclusively verified.
+590. `server/services/cryptocrawl/execution/adapters/primary-market-anchor-routes.ts` — Intra-repository dependency or independent status not conclusively verified.
+591. `server/services/cryptocrawl/execution/adapters/protocol-anchor-adapter.ts` — Imports code outside the trading candidate set.
+592. `server/services/cryptocrawl/execution/adapters/provider-specific-receiver-bootstrap.ts` — Intra-repository dependency or independent status not conclusively verified.
+593. `server/services/cryptocrawl/execution/adapters/railway-bootstrap-budget.ts` — Imports code outside the trading candidate set.
+594. `server/services/cryptocrawl/execution/adapters/ravn-execution-adapter.ts` — Intra-repository dependency or independent status not conclusively verified.
+595. `server/services/cryptocrawl/execution/adapters/skale-pow-adapter.ts` — Intra-repository dependency or independent status not conclusively verified.
+596. `server/services/cryptocrawl/execution/adapters/sponsored-receiver-manager.ts` — Imports code outside the trading candidate set.
+597. `server/services/cryptocrawl/execution/adapters/stage4-capital-provenance.ts` — Imports code outside the trading candidate set.
+598. `server/services/cryptocrawl/execution/adapters/stage4-execution-ledger.ts` — Imports code outside the trading candidate set.
+599. `server/services/cryptocrawl/execution/adapters/stage4-pow-compute-coordinator.ts` — Referenced by an existing runtime/build/verification entrypoint.
+600. `server/services/cryptocrawl/execution/adapters/zero-capital-route-direction.ts` — Intra-repository dependency or independent status not conclusively verified.
+601. `server/services/cryptocrawl/execution/builder-sponsored-receiver-bootstrap.ts` — Imports code outside the trading candidate set.
+602. `server/services/cryptocrawl/execution/builder-sponsored-zero-capital-coldstart.ts` — Imports code outside the trading candidate set.
+603. `server/services/cryptocrawl/execution/canonical-execution-scheduler.ts` — Imports code outside the trading candidate set.
+604. `server/services/cryptocrawl/execution/centralized-exchange-executor.ts` — Imports code outside the trading candidate set.
+605. `server/services/cryptocrawl/execution/cex-inventory-ledger.ts` — Imports code outside the trading candidate set.
+606. `server/services/cryptocrawl/execution/cex-order-mode-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
+607. `server/services/cryptocrawl/execution/cex-order-serialization.ts` — Intra-repository dependency or independent status not conclusively verified.
+608. `server/services/cryptocrawl/execution/cex-private-websocket-order-transport.ts` — Imports code outside the trading candidate set.
+609. `server/services/cryptocrawl/execution/cex-settlement.ts` — Imports code outside the trading candidate set.
+610. `server/services/cryptocrawl/execution/cex-spot-product-policy.ts` — Imports code outside the trading candidate set.
+611. `server/services/cryptocrawl/execution/cex-submit-time-product-guard.ts` — Intra-repository dependency or independent status not conclusively verified.
+612. `server/services/cryptocrawl/execution/cex-system-capital-placement.ts` — Imports code outside the trading candidate set.
+613. `server/services/cryptocrawl/execution/cex-system-capital-settlement-evidence.ts` — Intra-repository dependency or independent status not conclusively verified.
+614. `server/services/cryptocrawl/execution/cex-system-owned-inventory-transform.ts` — Imports code outside the trading candidate set.
+615. `server/services/cryptocrawl/execution/cex-system-owned-lot-ledger.ts` — Intra-repository dependency or independent status not conclusively verified.
+616. `server/services/cryptocrawl/execution/cex-treasury-transfer-worker.ts` — Imports code outside the trading candidate set.
+617. `server/services/cryptocrawl/execution/chain-native-fees.ts` — Intra-repository dependency or independent status not conclusively verified.
+618. `server/services/cryptocrawl/execution/coinbase-convert-execution-auction.ts` — Imports code outside the trading candidate set.
+619. `server/services/cryptocrawl/execution/coinbase-executable-plan-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
+620. `server/services/cryptocrawl/execution/coinbase-product-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
+621. `server/services/cryptocrawl/execution/coinbase-spot-settlement-adapter.ts` — Imports code outside the trading candidate set.
+622. `server/services/cryptocrawl/execution/coinbase-system-capital-placement.ts` — Imports code outside the trading candidate set.
+623. `server/services/cryptocrawl/execution/coinbase-system-capital-settlement-evidence.ts` — Intra-repository dependency or independent status not conclusively verified.
+624. `server/services/cryptocrawl/execution/controlled-loss-feedback-recovery.ts` — Imports code outside the trading candidate set.
+625. `server/services/cryptocrawl/execution/controlled-loss-learning-runtime.ts` — Imports code outside the trading candidate set.
+626. `server/services/cryptocrawl/execution/controlled-loss-learning-worker.ts` — Imports code outside the trading candidate set.
+627. `server/services/cryptocrawl/execution/cross-chain-durable-lifecycle.ts` — Imports code outside the trading candidate set.
+628. `server/services/cryptocrawl/execution/cryptara-dynamic-canary-controller.ts` — Intra-repository dependency or independent status not conclusively verified.
+629. `server/services/cryptocrawl/execution/dex-settlement-observer.ts` — Imports code outside the trading candidate set.
+630. `server/services/cryptocrawl/execution/dex-zerox-atomic-executor.ts` — Imports code outside the trading candidate set.
+631. `server/services/cryptocrawl/execution/distributed-api-quota.ts` — Intra-repository dependency or independent status not conclusively verified.
+632. `server/services/cryptocrawl/execution/evm-signer-lane.ts` — Intra-repository dependency or independent status not conclusively verified.
+633. `server/services/cryptocrawl/execution/exact-decimal.ts` — Intra-repository dependency or independent status not conclusively verified.
+634. `server/services/cryptocrawl/execution/exact-post-victim-backrun-compiler.ts` — Imports code outside the trading candidate set.
+635. `server/services/cryptocrawl/execution/execution-readiness.ts` — Intra-repository dependency or independent status not conclusively verified.
+636. `server/services/cryptocrawl/execution/flash-liquidation-executor.ts` — Imports code outside the trading candidate set.
+637. `server/services/cryptocrawl/execution/flash-loan-aggregator.ts` — Imports code outside the trading candidate set.
+638. `server/services/cryptocrawl/execution/funding-capital-reservation.ts` — Imports code outside the trading candidate set.
+639. `server/services/cryptocrawl/execution/funding-crosschain-execution-adapter.ts` — Imports code outside the trading candidate set.
+640. `server/services/cryptocrawl/execution/funding-position-lifecycle.ts` — Referenced/imported from outside the trading candidate set.
+641. `server/services/cryptocrawl/execution/hyper-hybrid-cex-execution.ts` — Imports code outside the trading candidate set.
+642. `server/services/cryptocrawl/execution/index.ts` — Imports code outside the trading candidate set.
+643. `server/services/cryptocrawl/execution/inventory-rebalance-executor.ts` — Imports code outside the trading candidate set.
+644. `server/services/cryptocrawl/execution/inventory-rebalancer.ts` — Intra-repository dependency or independent status not conclusively verified.
+645. `server/services/cryptocrawl/execution/kalshi-cross-venue-event-lifecycle.ts` — Imports code outside the trading candidate set.
+646. `server/services/cryptocrawl/execution/kalshi-cross-venue-terminal-reconciliation.ts` — Imports code outside the trading candidate set.
+647. `server/services/cryptocrawl/execution/kalshi-event-canonical-dispatch.ts` — Imports code outside the trading candidate set.
+648. `server/services/cryptocrawl/execution/kalshi-event-canonical-maintenance.ts` — Imports code outside the trading candidate set.
+649. `server/services/cryptocrawl/execution/kalshi-event-historical-recovery.ts` — Imports code outside the trading candidate set.
+650. `server/services/cryptocrawl/execution/kalshi-event-lifecycle.ts` — Imports code outside the trading candidate set.
+651. `server/services/cryptocrawl/execution/kalshi-event-market-maker.ts` — Imports code outside the trading candidate set.
+652. `server/services/cryptocrawl/execution/kalshi-event-order-authority.ts` — Imports code outside the trading candidate set.
+653. `server/services/cryptocrawl/execution/kalshi-event-resource-lease.ts` — Imports code outside the trading candidate set.
+654. `server/services/cryptocrawl/execution/kalshi-event-system-owned-cash-ledger.ts` — Imports code outside the trading candidate set.
+655. `server/services/cryptocrawl/execution/kalshi-funding-cex-hedge.ts` — Intra-repository dependency or independent status not conclusively verified.
+656. `server/services/cryptocrawl/execution/kalshi-funding-evidence.ts` — Imports code outside the trading candidate set.
+657. `server/services/cryptocrawl/execution/kalshi-funding-hedge-capital.ts` — Imports code outside the trading candidate set.
+658. `server/services/cryptocrawl/execution/kalshi-funding-lifecycle-adapter.ts` — Imports code outside the trading candidate set.
+659. `server/services/cryptocrawl/execution/kalshi-perps-order-authority.ts` — Imports code outside the trading candidate set.
+660. `server/services/cryptocrawl/execution/kalshi-post-cex-fallback.ts` — Intra-repository dependency or independent status not conclusively verified.
+661. `server/services/cryptocrawl/execution/kalshi-system-owned-margin-ledger.ts` — Imports code outside the trading candidate set.
+662. `server/services/cryptocrawl/execution/kraken-maker-queue-amend.ts` — Imports code outside the trading candidate set.
+663. `server/services/cryptocrawl/execution/kraken-system-capital-placement.ts` — Imports code outside the trading candidate set.
+664. `server/services/cryptocrawl/execution/low-latency-execution-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
+665. `server/services/cryptocrawl/execution/maker-lifecycle-trace.ts` — Intra-repository dependency or independent status not conclusively verified.
+666. `server/services/cryptocrawl/execution/measured-topology-execution-adapter.ts` — Imports code outside the trading candidate set.
+667. `server/services/cryptocrawl/execution/meson-zeroex-native-gas-strategy.ts` — Intra-repository dependency or independent status not conclusively verified.
+668. `server/services/cryptocrawl/execution/mev-backrun-executor.ts` — Imports code outside the trading candidate set.
+669. `server/services/cryptocrawl/execution/multi-relay-submitter.ts` — Imports code outside the trading candidate set.
+670. `server/services/cryptocrawl/execution/native-gas-funding-coordinator.ts` — Imports code outside the trading candidate set.
+671. `server/services/cryptocrawl/execution/okx-convert-execution-auction.ts` — Imports code outside the trading candidate set.
+672. `server/services/cryptocrawl/execution/okx-convert-settlement-wrapper.ts` — Imports code outside the trading candidate set.
+673. `server/services/cryptocrawl/execution/okx-funding-evidence.ts` — Intra-repository dependency or independent status not conclusively verified.
+674. `server/services/cryptocrawl/execution/okx-funding-lifecycle-adapter.ts` — Imports code outside the trading candidate set.
+675. `server/services/cryptocrawl/execution/okx-margin-short-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
+676. `server/services/cryptocrawl/execution/onchain-receiver-profit-provenance.ts` — Intra-repository dependency or independent status not conclusively verified.
+677. `server/services/cryptocrawl/execution/onchain-system-capital-ledger.ts` — Intra-repository dependency or independent status not conclusively verified.
+678. `server/services/cryptocrawl/execution/onchain-system-capital-reconciler.ts` — Imports code outside the trading candidate set.
+679. `server/services/cryptocrawl/execution/polymarket-event-order-authority.ts` — Imports code outside the trading candidate set.
+680. `server/services/cryptocrawl/execution/polymarket-event-settlement-authority.ts` — Imports code outside the trading candidate set.
+681. `server/services/cryptocrawl/execution/polymarket-system-owned-cash-ledger.ts` — Imports code outside the trading candidate set.
+682. `server/services/cryptocrawl/execution/post-only-maker-adapters.ts` — Imports code outside the trading candidate set.
+683. `server/services/cryptocrawl/execution/prepared-native-fee-budget.ts` — Intra-repository dependency or independent status not conclusively verified.
+684. `server/services/cryptocrawl/execution/resource-lease-authority.ts` — Referenced/imported from outside the trading candidate set.
+685. `server/services/cryptocrawl/execution/resource-scheduler.ts` — Imports code outside the trading candidate set.
+686. `server/services/cryptocrawl/execution/self-funded-cex-bootstrap.ts` — Imports code outside the trading candidate set.
+687. `server/services/cryptocrawl/execution/settlement-types.ts` — Intra-repository dependency or independent status not conclusively verified.
+688. `server/services/cryptocrawl/execution/stablecoin-maker-strategy.ts` — Intra-repository dependency or independent status not conclusively verified.
+689. `server/services/cryptocrawl/execution/system-capital-allocation-ledger.ts` — Intra-repository dependency or independent status not conclusively verified.
+690. `server/services/cryptocrawl/execution/system-capital-sweep-worker.ts` — Imports code outside the trading candidate set.
+691. `server/services/cryptocrawl/execution/system-native-gas-spend-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
+692. `server/services/cryptocrawl/execution/system-owned-native-transaction.ts` — Intra-repository dependency or independent status not conclusively verified.
+693. `server/services/cryptocrawl/execution/treasury-transfer-recovery-worker.ts` — Imports code outside the trading candidate set.
+694. `server/services/cryptocrawl/execution/ultra-low-latency-executor.ts` — Imports code outside the trading candidate set.
+695. `server/services/cryptocrawl/execution/unified-execution-router.ts` — Intra-repository dependency or independent status not conclusively verified.
+696. `server/services/cryptocrawl/execution/zero-capital-alternative-prepared-executor.ts` — Intra-repository dependency or independent status not conclusively verified.
+697. `server/services/cryptocrawl/execution/zero-capital-canonical-executor.ts` — Imports code outside the trading candidate set.
+698. `server/services/cryptocrawl/execution/zero-capital-composite-prepared-executor.ts` — Intra-repository dependency or independent status not conclusively verified.
+699. `server/services/cryptocrawl/execution/zero-capital-composite-selection-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
+700. `server/services/cryptocrawl/execution/zero-capital-flash-canonical-executor.ts` — Imports code outside the trading candidate set.
+701. `server/services/cryptocrawl/execution/zero-capital-realized-profit-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
+702. `server/services/cryptocrawl/execution/zero-capital-rescue-fairness.ts` — Intra-repository dependency or independent status not conclusively verified.
+703. `server/services/cryptocrawl/execution/zero-capital-resource-scheduler.ts` — Imports code outside the trading candidate set.
+704. `server/services/cryptocrawl/faucet/autonomous-faucet.ts` — Referenced/imported from outside the trading candidate set.
+705. `server/services/cryptocrawl/faucet/competition-evidence-policy.ts` — Referenced by an existing runtime/build/verification entrypoint.
+706. `server/services/cryptocrawl/faucet/concurrent-execution-wiring.ts` — Imports code outside the trading candidate set.
+707. `server/services/cryptocrawl/faucet/facet-handler.ts` — Imports code outside the trading candidate set.
+708. `server/services/cryptocrawl/faucet/facet-high-risk-tests.ts` — Intra-repository dependency or independent status not conclusively verified.
+709. `server/services/cryptocrawl/faucet/facet-simulation.ts` — Intra-repository dependency or independent status not conclusively verified.
+710. `server/services/cryptocrawl/faucet/facet-test-runner.ts` — Intra-repository dependency or independent status not conclusively verified.
+711. `server/services/cryptocrawl/faucet/higher-order-mesh.ts` — External code/configuration/document reference remains.
+712. `server/services/cryptocrawl/faucet/index.ts` — Intra-repository dependency or independent status not conclusively verified.
+713. `server/services/cryptocrawl/ghost-wallet/capital-fabric.ts` — Intra-repository dependency or independent status not conclusively verified.
+714. `server/services/cryptocrawl/ghost-wallet/existing-arbitrage-infrastructure.ts` — Intra-repository dependency or independent status not conclusively verified.
+715. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-advisory.ts` — Intra-repository dependency or independent status not conclusively verified.
+716. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-autonomous-controller.ts` — Referenced/imported from outside the trading candidate set.
+717. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-bootstrap-work-recovery.ts` — Intra-repository dependency or independent status not conclusively verified.
+718. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-borrower-demand-mesh.ts` — Imports code outside the trading candidate set.
+719. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-borrower-mandate.ts` — Referenced/imported from outside the trading candidate set.
+720. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-borrower-surface.ts` — Referenced/imported from outside the trading candidate set.
+721. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-builder.ts` — Intra-repository dependency or independent status not conclusively verified.
+722. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-chain-events.ts` — Imports code outside the trading candidate set.
+723. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-controller-economics.ts` — Intra-repository dependency or independent status not conclusively verified.
+724. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-engine.ts` — Referenced/imported from outside the trading candidate set.
+725. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-external-bridge.ts` — Referenced/imported from outside the trading candidate set.
+726. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-funding-mesh.ts` — Intra-repository dependency or independent status not conclusively verified.
+727. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-gas-pricing.ts` — Intra-repository dependency or independent status not conclusively verified.
+728. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-gas-reserve-schema.ts` — Intra-repository dependency or independent status not conclusively verified.
+729. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-gas-reserve.ts` — Imports code outside the trading candidate set.
+730. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-infrastructure-manager.ts` — Intra-repository dependency or independent status not conclusively verified.
+731. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-intermediary-bootstrap.ts` — Imports code outside the trading candidate set.
+732. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-log-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
+733. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-mandate-runtime-guard.ts` — Intra-repository dependency or independent status not conclusively verified.
+734. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-payout.ts` — Intra-repository dependency or independent status not conclusively verified.
+735. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-performance-intelligence.ts` — Referenced/imported from outside the trading candidate set.
+736. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-pimlico-sponsor.ts` — Intra-repository dependency or independent status not conclusively verified.
+737. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-provider-mesh.ts` — Referenced/imported from outside the trading candidate set.
+738. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-runtime-state.ts` — Intra-repository dependency or independent status not conclusively verified.
+739. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-settlement-ingest.ts` — Intra-repository dependency or independent status not conclusively verified.
+740. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-ultra-worker.ts` — Imports code outside the trading candidate set.
+741. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-uniswapx-demand.ts` — Imports code outside the trading candidate set.
+742. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-venue-universe.ts` — Intra-repository dependency or independent status not conclusively verified.
+743. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-work-codec.ts` — Intra-repository dependency or independent status not conclusively verified.
+744. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-work-dedupe.ts` — Intra-repository dependency or independent status not conclusively verified.
+745. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-work-ledger.ts` — Intra-repository dependency or independent status not conclusively verified.
+746. `server/services/cryptocrawl/ghost-wallet/ghost-wallet-work-signal.ts` — Intra-repository dependency or independent status not conclusively verified.
+747. `server/services/cryptocrawl/ghost-wallet/intent-book.ts` — Intra-repository dependency or independent status not conclusively verified.
+748. `server/services/cryptocrawl/ghost-wallet/onchain-capital-sources.ts` — Intra-repository dependency or independent status not conclusively verified.
+749. `server/services/cryptocrawl/ghost-wallet/profit-funded-native-payout.ts` — Intra-repository dependency or independent status not conclusively verified.
+750. `server/services/cryptocrawl/ghost-wallet/zero-capital-alternative-selection-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
+751. `server/services/cryptocrawl/governance/adaptive-profit-operating-envelope.ts` — Intra-repository dependency or independent status not conclusively verified.
+752. `server/services/cryptocrawl/governance/arbitrage-agents.ts` — Referenced/imported from outside the trading candidate set.
+753. `server/services/cryptocrawl/governance/atomic-zero-capital-strategy-coverage.ts` — Intra-repository dependency or independent status not conclusively verified.
+754. `server/services/cryptocrawl/governance/automatic-stage-progression.ts` — Imports code outside the trading candidate set.
+755. `server/services/cryptocrawl/governance/autonomy.ts` — Intra-repository dependency or independent status not conclusively verified.
+756. `server/services/cryptocrawl/governance/compatibility.ts` — Intra-repository dependency or independent status not conclusively verified.
+757. `server/services/cryptocrawl/governance/composer-interface.ts` — Imports code outside the trading candidate set.
+758. `server/services/cryptocrawl/governance/cryptara-integration.ts` — Imports code outside the trading candidate set.
+759. `server/services/cryptocrawl/governance/DEPLOYMENT_GUIDE.md` — Documentation; retain pending fuller transfer.
+760. `server/services/cryptocrawl/governance/diagnostic.ts` — Intra-repository dependency or independent status not conclusively verified.
+761. `server/services/cryptocrawl/governance/escalation.ts` — Intra-repository dependency or independent status not conclusively verified.
+762. `server/services/cryptocrawl/governance/governance.ts` — Imports code outside the trading candidate set.
+763. `server/services/cryptocrawl/governance/handler.ts` — Intra-repository dependency or independent status not conclusively verified.
+764. `server/services/cryptocrawl/governance/hard-limits.ts` — Intra-repository dependency or independent status not conclusively verified.
+765. `server/services/cryptocrawl/governance/index.ts` — Referenced/imported from outside the trading candidate set.
+766. `server/services/cryptocrawl/governance/kill-switch.ts` — Imports code outside the trading candidate set.
+767. `server/services/cryptocrawl/governance/monitoring-dashboard.ts` — Imports code outside the trading candidate set.
+768. `server/services/cryptocrawl/governance/operator-trading-strategy.ts` — Imports code outside the trading candidate set.
+769. `server/services/cryptocrawl/governance/profit-admission-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
+770. `server/services/cryptocrawl/governance/profit-ladder-daily-profit-budget.ts` — Intra-repository dependency or independent status not conclusively verified.
+771. `server/services/cryptocrawl/governance/profit-ladder-notional-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
+772. `server/services/cryptocrawl/governance/profit-ladder.ts` — Imports code outside the trading candidate set.
+773. `server/services/cryptocrawl/governance/risk-governor.ts` — Referenced/imported from outside the trading candidate set.
+774. `server/services/cryptocrawl/governance/stage-governor.ts` — Intra-repository dependency or independent status not conclusively verified.
+775. `server/services/cryptocrawl/governance/stage-management.ts` — Imports code outside the trading candidate set.
+776. `server/services/cryptocrawl/governance/stage-one-bootstrap-authority.ts` — Imports code outside the trading candidate set.
+777. `server/services/cryptocrawl/governance/stage-one-evidence-hydrator.ts` — Imports code outside the trading candidate set.
+778. `server/services/cryptocrawl/governance/stage-state-store.ts` — Intra-repository dependency or independent status not conclusively verified.
+779. `server/services/cryptocrawl/governance/system-control.ts` — Intra-repository dependency or independent status not conclusively verified.
+780. `server/services/cryptocrawl/governance/tests/governance-test-suite.ts` — Imports code outside the trading candidate set.
+781. `server/services/cryptocrawl/governance/treasury-execution-barrier.ts` — Intra-repository dependency or independent status not conclusively verified.
+782. `server/services/cryptocrawl/governance/types.ts` — Intra-repository dependency or independent status not conclusively verified.
+783. `server/services/cryptocrawl/governance/zero-capital-infrastructure-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
+784. `server/services/cryptocrawl/HYPER_EVOLVING_SWARM.md` — Documentation; retain pending fuller transfer.
+785. `server/services/cryptocrawl/index.ts` — Referenced by an existing runtime/build/verification entrypoint.
+786. `server/services/cryptocrawl/initial-gas-readiness.ts` — Intra-repository dependency or independent status not conclusively verified.
+787. `server/services/cryptocrawl/integration/across-bridge-observability.ts` — Imports code outside the trading candidate set.
+788. `server/services/cryptocrawl/integration/ape-adaptive-command.ts` — Intra-repository dependency or independent status not conclusively verified.
+789. `server/services/cryptocrawl/integration/ape-directional-market.ts` — Intra-repository dependency or independent status not conclusively verified.
+790. `server/services/cryptocrawl/integration/ape-hypergraph-intelligence.ts` — Intra-repository dependency or independent status not conclusively verified.
+791. `server/services/cryptocrawl/integration/ape-measured-opportunity-admission.ts` — Intra-repository dependency or independent status not conclusively verified.
+792. `server/services/cryptocrawl/integration/ape-profitability-toolbox.ts` — Intra-repository dependency or independent status not conclusively verified.
+793. `server/services/cryptocrawl/integration/ape-profitable-snapshot-lease.ts` — Intra-repository dependency or independent status not conclusively verified.
+794. `server/services/cryptocrawl/integration/ape-rescue-orchestration.ts` — Intra-repository dependency or independent status not conclusively verified.
+795. `server/services/cryptocrawl/integration/ape-resident-workbench.ts` — Intra-repository dependency or independent status not conclusively verified.
+796. `server/services/cryptocrawl/integration/atomic-bps-anytime-race.ts` — External code/configuration/document reference remains.
+797. `server/services/cryptocrawl/integration/atomic-profitability-resident-routing.ts` — Intra-repository dependency or independent status not conclusively verified.
+798. `server/services/cryptocrawl/integration/authenticated-fee-tier-optimization-wiring.ts` — Imports code outside the trading candidate set.
+799. `server/services/cryptocrawl/integration/authoritative-monte-carlo-wiring.ts` — Imports code outside the trading candidate set.
+800. `server/services/cryptocrawl/integration/bps-activity.ts` — Imports code outside the trading candidate set.
+801. `server/services/cryptocrawl/integration/bps-compression-mesh.ts` — Imports code outside the trading candidate set.
+802. `server/services/cryptocrawl/integration/bps-decomposition-observability.ts` — Imports code outside the trading candidate set.
+803. `server/services/cryptocrawl/integration/bps-frontier-wave3-wiring.ts` — Imports code outside the trading candidate set.
+804. `server/services/cryptocrawl/integration/bps-private-refund-evidence.ts` — Imports code outside the trading candidate set.
+805. `server/services/cryptocrawl/integration/canonical-runtime-wiring.ts` — Imports code outside the trading candidate set.
+806. `server/services/cryptocrawl/integration/cex-fee-recovery-wiring.ts` — Imports code outside the trading candidate set.
+807. `server/services/cryptocrawl/integration/cex-four-mode-observability-wiring.ts` — Imports code outside the trading candidate set.
+808. `server/services/cryptocrawl/integration/cex-inventory-readiness-wiring.ts` — Imports code outside the trading candidate set.
+809. `server/services/cryptocrawl/integration/computational-reactor-wiring.ts` — Imports code outside the trading candidate set.
+810. `server/services/cryptocrawl/integration/cross-venue-timing-guard-wiring.ts` — Imports code outside the trading candidate set.
+811. `server/services/cryptocrawl/integration/cryptara-assessment-wiring.ts` — Imports code outside the trading candidate set.
+812. `server/services/cryptocrawl/integration/cryptara-beam-wiring.ts` — Referenced/imported from outside the trading candidate set.
+813. `server/services/cryptocrawl/integration/cryptara-bootstrap-wiring.ts` — Imports code outside the trading candidate set.
+814. `server/services/cryptocrawl/integration/cryptara-cex-evidence-wiring.ts` — Imports code outside the trading candidate set.
+815. `server/services/cryptocrawl/integration/cryptara-kalshi-prediction-wiring.ts` — Imports code outside the trading candidate set.
+816. `server/services/cryptocrawl/integration/cryptara-ml-persistence.ts` — Imports code outside the trading candidate set.
+817. `server/services/cryptocrawl/integration/cryptara-overflow-primary-gateway.ts` — Intra-repository dependency or independent status not conclusively verified.
+818. `server/services/cryptocrawl/integration/cryptara-overflow-super-worker.ts` — Intra-repository dependency or independent status not conclusively verified.
+819. `server/services/cryptocrawl/integration/cryptara-parallel-cognition.ts` — Intra-repository dependency or independent status not conclusively verified.
+820. `server/services/cryptocrawl/integration/cryptara-predictive-prefetch-wiring.ts` — Imports code outside the trading candidate set.
+821. `server/services/cryptocrawl/integration/cryptara-primary-archive-worker.ts` — Imports code outside the trading candidate set.
+822. `server/services/cryptocrawl/integration/cryptara-provider-consensus-wiring.ts` — Imports code outside the trading candidate set.
+823. `server/services/cryptocrawl/integration/cryptara-resource-intelligence.ts` — Intra-repository dependency or independent status not conclusively verified.
+824. `server/services/cryptocrawl/integration/cryptara-shared-readiness.ts` — Intra-repository dependency or independent status not conclusively verified.
+825. `server/services/cryptocrawl/integration/cryptara-sovereign-cortex-wiring.ts` — Imports code outside the trading candidate set.
+826. `server/services/cryptocrawl/integration/cryptara-supabase-admission-worker.ts` — Imports code outside the trading candidate set.
+827. `server/services/cryptocrawl/integration/cryptara-supabase-comp-switch.ts` — Intra-repository dependency or independent status not conclusively verified.
+828. `server/services/cryptocrawl/integration/cryptara-supabase-hyper-bridge-bootstrap.ts` — Intra-repository dependency or independent status not conclusively verified.
+829. `server/services/cryptocrawl/integration/cryptara-supabase-hyper-bridge.ts` — Intra-repository dependency or independent status not conclusively verified.
+830. `server/services/cryptocrawl/integration/cryptara-supabase-overflow-worker.ts` — Imports code outside the trading candidate set.
+831. `server/services/cryptocrawl/integration/cryptara-super-worker.ts` — Intra-repository dependency or independent status not conclusively verified.
+832. `server/services/cryptocrawl/integration/cryptara-two-speed-revalidation-wiring.ts` — Imports code outside the trading candidate set.
+833. `server/services/cryptocrawl/integration/dual-provider-zero-capital-execution-wiring.ts` — Imports code outside the trading candidate set.
+834. `server/services/cryptocrawl/integration/dynamic-profitability-admission-wiring.ts` — Imports code outside the trading candidate set.
+835. `server/services/cryptocrawl/integration/economic-transformation-wiring.ts` — Imports code outside the trading candidate set.
+836. `server/services/cryptocrawl/integration/execution-readiness-profitability-wiring.ts` — Imports code outside the trading candidate set.
+837. `server/services/cryptocrawl/integration/external-capital-selection-observer.ts` — Imports code outside the trading candidate set.
+838. `server/services/cryptocrawl/integration/filtered-mempool-observability.ts` — Imports code outside the trading candidate set.
+839. `server/services/cryptocrawl/integration/inventory-constrained-cex-execution-wiring.ts` — Imports code outside the trading candidate set.
+840. `server/services/cryptocrawl/integration/kalshi-bps-optimization-wiring.ts` — Imports code outside the trading candidate set.
+841. `server/services/cryptocrawl/integration/kalshi-monte-carlo-context-wiring.ts` — Imports code outside the trading candidate set.
+842. `server/services/cryptocrawl/integration/kalshi-quanti-context.ts` — Intra-repository dependency or independent status not conclusively verified.
+843. `server/services/cryptocrawl/integration/kalshi-system-wiring.ts` — Imports code outside the trading candidate set.
+844. `server/services/cryptocrawl/integration/learning-lifecycle-wiring.ts` — Imports code outside the trading candidate set.
+845. `server/services/cryptocrawl/integration/legacy-intelligence-quarantine.ts` — Imports code outside the trading candidate set.
+846. `server/services/cryptocrawl/integration/master-orchestrator-measured-wiring.ts` — Imports code outside the trading candidate set.
+847. `server/services/cryptocrawl/integration/master-pipeline.ts` — Referenced/imported from outside the trading candidate set.
+848. `server/services/cryptocrawl/integration/measured-candidate-expiry-guard-wiring.ts` — Imports code outside the trading candidate set.
+849. `server/services/cryptocrawl/integration/measured-rebalance-route-evidence-wiring.ts` — Imports code outside the trading candidate set.
+850. `server/services/cryptocrawl/integration/monte-carlo-calibration-wiring.ts` — Imports code outside the trading candidate set.
+851. `server/services/cryptocrawl/integration/oracle-evidence-wiring.ts` — Imports code outside the trading candidate set.
+852. `server/services/cryptocrawl/integration/order-book-evolution-wiring.ts` — Imports code outside the trading candidate set.
+853. `server/services/cryptocrawl/integration/overflow-learning-persistence.ts` — Intra-repository dependency or independent status not conclusively verified.
+854. `server/services/cryptocrawl/integration/prediction-market-discovery-wiring.ts` — Imports code outside the trading candidate set.
+855. `server/services/cryptocrawl/integration/primary-learning-persistence.ts` — Imports code outside the trading candidate set.
+856. `server/services/cryptocrawl/integration/profitability-recovery-coordinator.ts` — Imports code outside the trading candidate set.
+857. `server/services/cryptocrawl/integration/provider-specific-zero-capital-execution-wiring.ts` — Imports code outside the trading candidate set.
+858. `server/services/cryptocrawl/integration/runtime-json-state-store.ts` — Intra-repository dependency or independent status not conclusively verified.
+859. `server/services/cryptocrawl/integration/runtime-observability.ts` — Imports code outside the trading candidate set.
+860. `server/services/cryptocrawl/integration/stage-one-spread-observability.ts` — Imports code outside the trading candidate set.
+861. `server/services/cryptocrawl/integration/stage-two-cross-chain-reduction.ts` — Imports code outside the trading candidate set.
+862. `server/services/cryptocrawl/integration/stage-two-zero-capital-bps-reduction.ts` — Imports code outside the trading candidate set.
+863. `server/services/cryptocrawl/integration/technical-evidence-synchronizer.ts` — Imports code outside the trading candidate set.
+864. `server/services/cryptocrawl/integration/telemetry-bootstrap.ts` — Imports code outside the trading candidate set.
+865. `server/services/cryptocrawl/integration/universal-bps-rescue-coordinator.ts` — Imports code outside the trading candidate set.
+866. `server/services/cryptocrawl/integration/zero-capital-alternative-capital-wiring.ts` — Intra-repository dependency or independent status not conclusively verified.
+867. `server/services/cryptocrawl/integration/zero-capital-atomic-bps-engine.ts` — Imports code outside the trading candidate set.
+868. `server/services/cryptocrawl/integration/zero-capital-atomic-bps-workers.ts` — Referenced by an existing runtime/build/verification entrypoint.
+869. `server/services/cryptocrawl/integration/zero-capital-atomic-stack-wiring.ts` — Imports code outside the trading candidate set.
+870. `server/services/cryptocrawl/integration/zero-capital-dynamic-attempt-barrier-wiring.ts` — Imports code outside the trading candidate set.
+871. `server/services/cryptocrawl/integration/zero-capital-flash-provider-wiring.ts` — Imports code outside the trading candidate set.
+872. `server/services/cryptocrawl/integration/zero-capital-profit-output-floor.ts` — Intra-repository dependency or independent status not conclusively verified.
+873. `server/services/cryptocrawl/integration/zero-capital-profitability-rescue-fair.ts` — Imports code outside the trading candidate set.
+874. `server/services/cryptocrawl/integration/zero-capital-profitability-rescue-v2.ts` — Imports code outside the trading candidate set.
+875. `server/services/cryptocrawl/integration/zero-capital-profitability-rescue-v3.ts` — Imports code outside the trading candidate set.
+876. `server/services/cryptocrawl/integration/zero-capital-profitability-rescue-v4.ts` — Imports code outside the trading candidate set.
+877. `server/services/cryptocrawl/integration/zero-capital-readiness-diagnostics.ts` — Imports code outside the trading candidate set.
+878. `server/services/cryptocrawl/integration/zero-capital-recovery-observability.ts` — Imports code outside the trading candidate set.
+879. `server/services/cryptocrawl/integration/zero-capital-resource-wiring.ts` — Imports code outside the trading candidate set.
+880. `server/services/cryptocrawl/integration/zero-capital-route-split-rescue-core.ts` — Imports code outside the trading candidate set.
+881. `server/services/cryptocrawl/integration/zero-capital-route-split-rescue.ts` — Imports code outside the trading candidate set.
+882. `server/services/cryptocrawl/integration/zero-capital-shadow-priority-wiring.ts` — Imports code outside the trading candidate set.
+883. `server/services/cryptocrawl/integration/zero-capital-stage-handoff-supervisor.ts` — Imports code outside the trading candidate set.
+884. `server/services/cryptocrawl/integration/zerox-budget-observability.ts` — Imports code outside the trading candidate set.
+885. `server/services/cryptocrawl/integrity/operational-integrity.ts` — Imports code outside the trading candidate set.
+886. `server/services/cryptocrawl/intelligence/aries-edge-formation-reactor.ts` — Intra-repository dependency or independent status not conclusively verified.
+887. `server/services/cryptocrawl/intelligence/aries-microstructure.ts` — Intra-repository dependency or independent status not conclusively verified.
+888. `server/services/cryptocrawl/intelligence/aries-vault.ts` — Intra-repository dependency or independent status not conclusively verified.
+889. `server/services/cryptocrawl/intelligence/canonical-intelligence-outbox.ts` — Imports code outside the trading candidate set.
+890. `server/services/cryptocrawl/intelligence/canonical-intelligence-repository.ts` — Imports code outside the trading candidate set.
+891. `server/services/cryptocrawl/intelligence/canonical-opportunity-state.ts` — Intra-repository dependency or independent status not conclusively verified.
+892. `server/services/cryptocrawl/intelligence/cex-cross-impact-advisory.ts` — Intra-repository dependency or independent status not conclusively verified.
+893. `server/services/cryptocrawl/intelligence/cex-fee-recovery-authority.ts` — Imports code outside the trading candidate set.
+894. `server/services/cryptocrawl/intelligence/cex-fee-resolver.ts` — Imports code outside the trading candidate set.
+895. `server/services/cryptocrawl/intelligence/cex-four-mode-matrix.ts` — Intra-repository dependency or independent status not conclusively verified.
+896. `server/services/cryptocrawl/intelligence/cex-order-book-stream.ts` — Imports code outside the trading candidate set.
+897. `server/services/cryptocrawl/intelligence/cex-order-control-health.ts` — Intra-repository dependency or independent status not conclusively verified.
+898. `server/services/cryptocrawl/intelligence/cex-private-authority.ts` — Imports code outside the trading candidate set.
+899. `server/services/cryptocrawl/intelligence/cex-private-execution-feedback.ts` — Imports code outside the trading candidate set.
+900. `server/services/cryptocrawl/intelligence/coinbase-advanced-market-data.ts` — Imports code outside the trading candidate set.
+901. `server/services/cryptocrawl/intelligence/coinbase-advanced-trade-authority.ts` — Imports code outside the trading candidate set.
+902. `server/services/cryptocrawl/intelligence/coinbase-app-private-authority.ts` — Imports code outside the trading candidate set.
+903. `server/services/cryptocrawl/intelligence/coinbase-app-read-authority.ts` — Imports code outside the trading candidate set.
+904. `server/services/cryptocrawl/intelligence/coinbase-fee-evidence.ts` — Imports code outside the trading candidate set.
+905. `server/services/cryptocrawl/intelligence/coinbase-fee-rebate-authority.ts` — Imports code outside the trading candidate set.
+906. `server/services/cryptocrawl/intelligence/coinbase-private-execution-feedback.ts` — Imports code outside the trading candidate set.
+907. `server/services/cryptocrawl/intelligence/coinbase-stablepair-fee-authority.ts` — Imports code outside the trading candidate set.
+908. `server/services/cryptocrawl/intelligence/dex-quote-provider-mesh.ts` — Imports code outside the trading candidate set.
+909. `server/services/cryptocrawl/intelligence/erc20-decimals-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
+910. `server/services/cryptocrawl/intelligence/gravity-reaper.ts` — Imports code outside the trading candidate set.
+911. `server/services/cryptocrawl/intelligence/hyper-neural-predictor.ts` — Imports code outside the trading candidate set.
+912. `server/services/cryptocrawl/intelligence/index.ts` — Referenced by an existing runtime/build/verification entrypoint.
+913. `server/services/cryptocrawl/intelligence/kalshi-authenticated-authority.ts` — Imports code outside the trading candidate set.
+914. `server/services/cryptocrawl/intelligence/kalshi-capital-efficiency-authority.ts` — Imports code outside the trading candidate set.
+915. `server/services/cryptocrawl/intelligence/kalshi-event-depth-authority.ts` — Imports code outside the trading candidate set.
+916. `server/services/cryptocrawl/intelligence/kalshi-event-fee-authority.ts` — Imports code outside the trading candidate set.
+917. `server/services/cryptocrawl/intelligence/kalshi-event-market-making-authority.ts` — Imports code outside the trading candidate set.
+918. `server/services/cryptocrawl/intelligence/kalshi-event-semantics-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
+919. `server/services/cryptocrawl/intelligence/kalshi-margin-fee-authority.ts` — Imports code outside the trading candidate set.
+920. `server/services/cryptocrawl/intelligence/kalshi-perps-market-authority.ts` — Imports code outside the trading candidate set.
+921. `server/services/cryptocrawl/intelligence/kalshi-prediction-market-authority.ts` — Imports code outside the trading candidate set.
+922. `server/services/cryptocrawl/intelligence/kalshi-probability-calibration-authority.ts` — Imports code outside the trading candidate set.
+923. `server/services/cryptocrawl/intelligence/kraken-funding-beta-authority.ts` — Imports code outside the trading candidate set.
+924. `server/services/cryptocrawl/intelligence/kraken-l3-queue-intelligence.ts` — Imports code outside the trading candidate set.
+925. `server/services/cryptocrawl/intelligence/liquidity-resilience.ts` — Intra-repository dependency or independent status not conclusively verified.
+926. `server/services/cryptocrawl/intelligence/maker-microstructure-proof.ts` — Imports code outside the trading candidate set.
+927. `server/services/cryptocrawl/intelligence/maker-terminal-calibration.ts` — Intra-repository dependency or independent status not conclusively verified.
+928. `server/services/cryptocrawl/intelligence/maker-tick-queue-optimizer.ts` — Intra-repository dependency or independent status not conclusively verified.
+929. `server/services/cryptocrawl/intelligence/market-data-providers.ts` — Imports code outside the trading candidate set.
+930. `server/services/cryptocrawl/intelligence/okx-account-fee-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
+931. `server/services/cryptocrawl/intelligence/okx-region-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
+932. `server/services/cryptocrawl/intelligence/okx-rpi-capability.ts` — Intra-repository dependency or independent status not conclusively verified.
+933. `server/services/cryptocrawl/intelligence/okx-rpi-fee-advisory.ts` — Imports code outside the trading candidate set.
+934. `server/services/cryptocrawl/intelligence/okx-rpi-taker-depth.ts` — Intra-repository dependency or independent status not conclusively verified.
+935. `server/services/cryptocrawl/intelligence/parallel-lanes.ts` — Imports code outside the trading candidate set.
+936. `server/services/cryptocrawl/intelligence/polymarket-authenticated-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
+937. `server/services/cryptocrawl/intelligence/polymarket-geographic-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
+938. `server/services/cryptocrawl/intelligence/profit-estimator.ts` — Intra-repository dependency or independent status not conclusively verified.
+939. `server/services/cryptocrawl/intelligence/provider-quality-auction.ts` — Intra-repository dependency or independent status not conclusively verified.
+940. `server/services/cryptocrawl/intelligence/six-cane-system.ts` — Imports code outside the trading candidate set.
+941. `server/services/cryptocrawl/intelligence/sovereign-antenna-quality.ts` — Intra-repository dependency or independent status not conclusively verified.
+942. `server/services/cryptocrawl/intelligence/token-contract-directory.ts` — Imports code outside the trading candidate set.
+943. `server/services/cryptocrawl/intelligence/universal-bps-opportunity-discovery.ts` — Imports code outside the trading candidate set.
+944. `server/services/cryptocrawl/intelligence/universal-bps-search-expansion.ts` — Imports code outside the trading candidate set.
+945. `server/services/cryptocrawl/intelligence/zerox-fee-economics.ts` — Intra-repository dependency or independent status not conclusively verified.
+946. `server/services/cryptocrawl/intelligence/zerox-request-budget.ts` — Intra-repository dependency or independent status not conclusively verified.
+947. `server/services/cryptocrawl/intelligence/zerox-request-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
+948. `server/services/cryptocrawl/learning/deep-learning-store.ts` — Imports code outside the trading candidate set.
+949. `server/services/cryptocrawl/learning/execution-outcome.ts` — Intra-repository dependency or independent status not conclusively verified.
+950. `server/services/cryptocrawl/learning/instant-learning-engine.ts` — Imports code outside the trading candidate set.
+951. `server/services/cryptocrawl/learning/reinforcement-learning-bidder.ts` — Imports code outside the trading candidate set.
+952. `server/services/cryptocrawl/learning/settlement-profit-calibrator.ts` — Intra-repository dependency or independent status not conclusively verified.
+953. `server/services/cryptocrawl/learning/supabase-compatibility.ts` — Imports code outside the trading candidate set.
+954. `server/services/cryptocrawl/learning/terminal-feedback-identity.ts` — Intra-repository dependency or independent status not conclusively verified.
+955. `server/services/cryptocrawl/legacy/index.ts` — Referenced by an existing runtime/build/verification entrypoint.
+956. `server/services/cryptocrawl/mev/triple-dip-extractor.ts` — Imports code outside the trading candidate set.
+957. `server/services/cryptocrawl/optimization/adaptive-profitability-search-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
+958. `server/services/cryptocrawl/optimization/adaptive-topology-optimizer.ts` — Intra-repository dependency or independent status not conclusively verified.
+959. `server/services/cryptocrawl/optimization/bps-reduction-super-engine.ts` — Intra-repository dependency or independent status not conclusively verified.
+960. `server/services/cryptocrawl/optimization/cryptara-adaptive-strategy-state.ts` — Imports code outside the trading candidate set.
+961. `server/services/cryptocrawl/optimization/cryptara-decision-priority.ts` — Intra-repository dependency or independent status not conclusively verified.
+962. `server/services/cryptocrawl/optimization/divine-engine.ts` — Imports code outside the trading candidate set.
+963. `server/services/cryptocrawl/optimization/dynamic-execution-path-selector.ts` — Intra-repository dependency or independent status not conclusively verified.
+964. `server/services/cryptocrawl/optimization/economic-transformation-engine.ts` — Intra-repository dependency or independent status not conclusively verified.
+965. `server/services/cryptocrawl/optimization/execution-readiness-profitability-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
+966. `server/services/cryptocrawl/optimization/external-capital-capability-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
+967. `server/services/cryptocrawl/optimization/fee-surface-hyperdynamic-strategy-engine.ts` — Intra-repository dependency or independent status not conclusively verified.
+968. `server/services/cryptocrawl/optimization/hyperdynamic-bps-solution-engine.ts` — Intra-repository dependency or independent status not conclusively verified.
+969. `server/services/cryptocrawl/optimization/index.ts` — Referenced by an existing runtime/build/verification entrypoint.
+970. `server/services/cryptocrawl/optimization/marginal-bps-allocator.ts` — Intra-repository dependency or independent status not conclusively verified.
+971. `server/services/cryptocrawl/optimization/nix-gen/authority.ts` — Intra-repository dependency or independent status not conclusively verified.
+972. `server/services/cryptocrawl/optimization/nix-gen/canonical-bid-adapters.ts` — Intra-repository dependency or independent status not conclusively verified.
+973. `server/services/cryptocrawl/optimization/nix-gen/capital-routing-advisory.ts` — Intra-repository dependency or independent status not conclusively verified.
+974. `server/services/cryptocrawl/optimization/nix-gen/cex-ordering.ts` — Intra-repository dependency or independent status not conclusively verified.
+975. `server/services/cryptocrawl/optimization/nix-gen/completion-manifest.ts` — Intra-repository dependency or independent status not conclusively verified.
+976. `server/services/cryptocrawl/optimization/nix-gen/coordinator.ts` — Intra-repository dependency or independent status not conclusively verified.
+977. `server/services/cryptocrawl/optimization/nix-gen/dual-resource-pricing.ts` — Intra-repository dependency or independent status not conclusively verified.
+978. `server/services/cryptocrawl/optimization/nix-gen/global-live-portfolio.ts` — Intra-repository dependency or independent status not conclusively verified.
+979. `server/services/cryptocrawl/optimization/nix-gen/global-optimizer.ts` — Intra-repository dependency or independent status not conclusively verified.
+980. `server/services/cryptocrawl/optimization/nix-gen/index.ts` — Intra-repository dependency or independent status not conclusively verified.
+981. `server/services/cryptocrawl/optimization/nix-gen/integration-contract.ts` — Intra-repository dependency or independent status not conclusively verified.
+982. `server/services/cryptocrawl/optimization/nix-gen/kalshi-advisory.ts` — Intra-repository dependency or independent status not conclusively verified.
+983. `server/services/cryptocrawl/optimization/nix-gen/live-priority-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
+984. `server/services/cryptocrawl/optimization/nix-gen/marginal-resource-value.ts` — Intra-repository dependency or independent status not conclusively verified.
+985. `server/services/cryptocrawl/optimization/nix-gen/measured-portfolio-preparation.ts` — Intra-repository dependency or independent status not conclusively verified.
+986. `server/services/cryptocrawl/optimization/nix-gen/portfolio-view.ts` — Intra-repository dependency or independent status not conclusively verified.
+987. `server/services/cryptocrawl/optimization/nix-gen/quanti-analysis.ts` — Intra-repository dependency or independent status not conclusively verified.
+988. `server/services/cryptocrawl/optimization/nix-gen/README.md` — Documentation; retain pending fuller transfer.
+989. `server/services/cryptocrawl/optimization/nix-gen/replanner.ts` — Intra-repository dependency or independent status not conclusively verified.
+990. `server/services/cryptocrawl/optimization/nix-gen/resource-opportunity-pricing.ts` — Intra-repository dependency or independent status not conclusively verified.
+991. `server/services/cryptocrawl/optimization/nix-gen/robust-uncertainty.ts` — Intra-repository dependency or independent status not conclusively verified.
+992. `server/services/cryptocrawl/optimization/nix-gen/scarcity-pricing.ts` — Intra-repository dependency or independent status not conclusively verified.
+993. `server/services/cryptocrawl/optimization/nix-gen/strategy-limb-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
+994. `server/services/cryptocrawl/optimization/nix-gen/terminal-calibration.ts` — Intra-repository dependency or independent status not conclusively verified.
+995. `server/services/cryptocrawl/optimization/nix-gen/types.ts` — Intra-repository dependency or independent status not conclusively verified.
+996. `server/services/cryptocrawl/optimization/nix-gen/zero-capital-ordering.ts` — Intra-repository dependency or independent status not conclusively verified.
+997. `server/services/cryptocrawl/optimization/opportunity-decay-model.ts` — Intra-repository dependency or independent status not conclusively verified.
+998. `server/services/cryptocrawl/optimization/profitability-score.ts` — Intra-repository dependency or independent status not conclusively verified.
+999. `server/services/cryptocrawl/optimization/research-bps-execution-tactics.ts` — Intra-repository dependency or independent status not conclusively verified.
+1000. `server/services/cryptocrawl/optimization/unified-multileg-arbitrage-engine.ts` — Imports code outside the trading candidate set.
+1001. `server/services/cryptocrawl/optimization/universal-fee-overcompensation-engine.ts` — Imports code outside the trading candidate set.
+1002. `server/services/cryptocrawl/optimization/zero-capital-composite-evidence-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
+1003. `server/services/cryptocrawl/optimization/zero-capital-provider-cost-curve.ts` — Referenced by an existing runtime/build/verification entrypoint.
+1004. `server/services/cryptocrawl/optimization/zero-capital-route-evidence-registry.ts` — Intra-repository dependency or independent status not conclusively verified.
+1005. `server/services/cryptocrawl/rate-limiting/automatic-rate-limiter.ts` — Imports code outside the trading candidate set.
+1006. `server/services/cryptocrawl/rate-limiting/index.ts` — Intra-repository dependency or independent status not conclusively verified.
+1007. `server/services/cryptocrawl/risk/circuit-breaker.ts` — External code/configuration/document reference remains.
+1008. `server/services/cryptocrawl/risk/kelly-criterion.ts` — Imports code outside the trading candidate set.
+1009. `server/services/cryptocrawl/risk/mandatory-risk-shield.ts` — External code/configuration/document reference remains.
+1010. `server/services/cryptocrawl/risk/progressive-position-sizing.ts` — Referenced by an existing runtime/build/verification entrypoint.
+1011. `server/services/cryptocrawl/runtime/adaptive-profit-operations-wiring.ts` — Imports code outside the trading candidate set.
+1012. `server/services/cryptocrawl/runtime/alchemy-filtered-mempool-wiring.ts` — Imports code outside the trading candidate set.
+1013. `server/services/cryptocrawl/runtime/alchemy-standard-rpc-first-wiring.ts` — Imports code outside the trading candidate set.
+1014. `server/services/cryptocrawl/runtime/coinbase-readiness-wiring.ts` — Imports code outside the trading candidate set.
+1015. `server/services/cryptocrawl/runtime/coincap-environment-wiring.ts` — Imports code outside the trading candidate set.
+1016. `server/services/cryptocrawl/runtime/core-runtime-lifecycle.ts` — Intra-repository dependency or independent status not conclusively verified.
+1017. `server/services/cryptocrawl/runtime/core-runtime.ts` — Imports code outside the trading candidate set.
+1018. `server/services/cryptocrawl/runtime/cryptocrawl-overflow-runtime-schema.ts` — Imports code outside the trading candidate set.
+1019. `server/services/cryptocrawl/runtime/cryptocrawl-runtime-database.ts` — Referenced/imported from outside the trading candidate set.
+1020. `server/services/cryptocrawl/runtime/database-coordination.ts` — Imports code outside the trading candidate set.
+1021. `server/services/cryptocrawl/runtime/discovery-work-context.ts` — Intra-repository dependency or independent status not conclusively verified.
+1022. `server/services/cryptocrawl/runtime/dynamic-rpc-provider-wiring.ts` — Imports code outside the trading candidate set.
+1023. `server/services/cryptocrawl/runtime/end-to-end-latency-harness.ts` — Imports code outside the trading candidate set.
+1024. `server/services/cryptocrawl/runtime/environment-contract.ts` — Intra-repository dependency or independent status not conclusively verified.
+1025. `server/services/cryptocrawl/runtime/expanded-market-universe-wiring.ts` — Imports code outside the trading candidate set.
+1026. `server/services/cryptocrawl/runtime/expanded-network-observability.ts` — Imports code outside the trading candidate set.
+1027. `server/services/cryptocrawl/runtime/hybrid-cex-execution-wiring.ts` — Imports code outside the trading candidate set.
+1028. `server/services/cryptocrawl/runtime/low-latency-execution-wiring.ts` — Imports code outside the trading candidate set.
+1029. `server/services/cryptocrawl/runtime/manual-power-state.ts` — Referenced/imported from outside the trading candidate set.
+1030. `server/services/cryptocrawl/runtime/market-focus-wiring.ts` — Imports code outside the trading candidate set.
+1031. `server/services/cryptocrawl/runtime/no-bps-maker-admission-wiring.ts` — Imports code outside the trading candidate set.
+1032. `server/services/cryptocrawl/runtime/performance-evidence-contract.ts` — Intra-repository dependency or independent status not conclusively verified.
+1033. `server/services/cryptocrawl/runtime/positive-profit-capture-wiring.ts` — Imports code outside the trading candidate set.
+1034. `server/services/cryptocrawl/runtime/rainbow-profit-bridge-wiring.ts` — Imports code outside the trading candidate set.
+1035. `server/services/cryptocrawl/runtime/readiness-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
+1036. `server/services/cryptocrawl/runtime/rpc-fallback-admission-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
+1037. `server/services/cryptocrawl/runtime/rpc-request-coalescer.ts` — Intra-repository dependency or independent status not conclusively verified.
+1038. `server/services/cryptocrawl/runtime/runtime-attestation.ts` — Intra-repository dependency or independent status not conclusively verified.
+1039. `server/services/cryptocrawl/runtime/runtime-invariant-monitor.ts` — Imports code outside the trading candidate set.
+1040. `server/services/cryptocrawl/runtime/stablecoin-maker-execution-wiring.ts` — Imports code outside the trading candidate set.
+1041. `server/services/cryptocrawl/runtime/stage-proof-metrics-wiring.ts` — Imports code outside the trading candidate set.
+1042. `server/services/cryptocrawl/runtime/system-capital-placement-wiring.ts` — Imports code outside the trading candidate set.
+1043. `server/services/cryptocrawl/runtime/system-capital-provenance.ts` — Intra-repository dependency or independent status not conclusively verified.
+1044. `server/services/cryptocrawl/runtime/system-owned-gas-funding-proof-wiring.ts` — Intra-repository dependency or independent status not conclusively verified.
+1045. `server/services/cryptocrawl/runtime/system-owned-native-zero-capital-execution-wiring.ts` — Imports code outside the trading candidate set.
+1046. `server/services/cryptocrawl/runtime/terminal-treasury-lifecycle.ts` — Imports code outside the trading candidate set.
+1047. `server/services/cryptocrawl/runtime/zero-capital-gas-authority.ts` — Intra-repository dependency or independent status not conclusively verified.
+1048. `server/services/cryptocrawl/runtime/zero-capital-network-capability-registry.ts` — Imports code outside the trading candidate set.
+1049. `server/services/cryptocrawl/runtime/zero-capital-realized-profit-wiring.ts` — Imports code outside the trading candidate set.
+1050. `server/services/cryptocrawl/scaling/dynamic-scale-physics.ts` — Imports code outside the trading candidate set.
+1051. `server/services/cryptocrawl/scaling/dynamic-scale-pressure-wiring.ts` — Imports code outside the trading candidate set.
+1052. `server/services/cryptocrawl/scaling/dynamic-scale-profile-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
+1053. `server/services/cryptocrawl/scanner/realtime-stream.ts` — Imports code outside the trading candidate set.
+1054. `server/services/cryptocrawl/scanners/IMPLEMENTATION_SUMMARY.md` — Documentation; retain pending fuller transfer.
+1055. `server/services/cryptocrawl/scanners/SECURITY_SUMMARY.md` — Documentation; retain pending fuller transfer.
+1056. `server/services/cryptocrawl/SECURITY_SUMMARY.md` — Documentation; retain pending fuller transfer.
+1057. `server/services/cryptocrawl/stealth/async-mutex.ts` — Intra-repository dependency or independent status not conclusively verified.
+1058. `server/services/cryptocrawl/stealth/circuit-breaker.ts` — External code/configuration/document reference remains.
+1059. `server/services/cryptocrawl/stealth/continuous-learning-system.ts` — Intra-repository dependency or independent status not conclusively verified.
+1060. `server/services/cryptocrawl/stealth/dynamic-scale-physics.ts` — Intra-repository dependency or independent status not conclusively verified.
+1061. `server/services/cryptocrawl/stealth/operational-integrity.ts` — Intra-repository dependency or independent status not conclusively verified.
+1062. `server/services/cryptocrawl/stealth/types.ts` — Intra-repository dependency or independent status not conclusively verified.
+1063. `server/services/cryptocrawl/stealth/ultra-low-latency-executor.ts` — Intra-repository dependency or independent status not conclusively verified.
+1064. `server/services/cryptocrawl/strategies/adaptive-ensemble-engine.ts` — Imports code outside the trading candidate set.
+1065. `server/services/cryptocrawl/strategies/advanced-arbitrage.ts` — Intra-repository dependency or independent status not conclusively verified.
+1066. `server/services/cryptocrawl/strategies/disco-ball-mirror.ts` — Intra-repository dependency or independent status not conclusively verified.
+1067. `server/services/cryptocrawl/strategies/gas-sponsorship.ts` — Intra-repository dependency or independent status not conclusively verified.
+1068. `server/services/cryptocrawl/strategies/snipe-strategy.ts` — Intra-repository dependency or independent status not conclusively verified.
+1069. `server/services/cryptocrawl/testing/cryptocrawler-test-harness.ts` — Imports code outside the trading candidate set.
+1070. `server/services/cryptocrawl/testing/extreme-scenario-tests.ts` — Imports code outside the trading candidate set.
+1071. `server/services/cryptocrawl/testing/index.ts` — Intra-repository dependency or independent status not conclusively verified.
+1072. `server/services/cryptocrawl/testing/live-market-dry-run.ts` — Imports code outside the trading candidate set.
+1073. `server/services/cryptocrawl/testing/run-1500-target-optimization.ts` — Intra-repository dependency or independent status not conclusively verified.
+1074. `server/services/cryptocrawl/testing/run-arbitrage-live-cycles.ts` — Intra-repository dependency or independent status not conclusively verified.
+1075. `server/services/cryptocrawl/testing/run-extreme-tests.ts` — Intra-repository dependency or independent status not conclusively verified.
+1076. `server/services/cryptocrawl/testing/run-profit-optimization.ts` — Intra-repository dependency or independent status not conclusively verified.
+1077. `server/services/cryptocrawl/testing/run-testnet-monte-carlo.ts` — Imports code outside the trading candidate set.
+1078. `server/services/cryptocrawl/testing/run-tests.ts` — Intra-repository dependency or independent status not conclusively verified.
+1079. `server/services/cryptocrawl/testing/verify-all-chains.ts` — Intra-repository dependency or independent status not conclusively verified.
+1080. `server/services/cryptocrawl/testing/verify-aries-vault.ts` — Intra-repository dependency or independent status not conclusively verified.
+1081. `server/services/cryptocrawl/testing/verify-automatic-native-gas-plan.ts` — Intra-repository dependency or independent status not conclusively verified.
+1082. `server/services/cryptocrawl/testing/verify-autonomous-stage-progression.ts` — Intra-repository dependency or independent status not conclusively verified.
+1083. `server/services/cryptocrawl/testing/verify-capital-hierarchy.ts` — Intra-repository dependency or independent status not conclusively verified.
+1084. `server/services/cryptocrawl/testing/verify-live-price-failover.ts` — Intra-repository dependency or independent status not conclusively verified.
+1085. `server/services/cryptocrawl/testing/verify-native-gas-funding-coordinator.ts` — Intra-repository dependency or independent status not conclusively verified.
+1086. `server/services/cryptocrawl/testing/verify-provider-failover.ts` — Intra-repository dependency or independent status not conclusively verified.
+1087. `server/services/cryptocrawl/testing/verify-settlement-lifecycle.ts` — Intra-repository dependency or independent status not conclusively verified.
+1088. `server/services/cryptocrawl/testing/verify-wallet-assets.ts` — Intra-repository dependency or independent status not conclusively verified.
+1089. `server/services/cryptocrawl/training/index.ts` — Referenced by an existing runtime/build/verification entrypoint.
+1090. `server/services/cryptocrawl/training/scheduled-monte-carlo-training.ts` — Imports code outside the trading candidate set.
+1091. `server/services/cryptocrawl/ui/dashboard-client.js` — Intra-repository dependency or independent status not conclusively verified.
+1092. `server/services/cryptocrawl/ui/dashboard.html` — Intra-repository dependency or independent status not conclusively verified.
+1093. `server/services/cryptocrawl/ui/README.md` — Documentation; retain pending fuller transfer.
+1094. `server/services/cryptocrawl/utils/resilient-http.ts` — Intra-repository dependency or independent status not conclusively verified.
+1095. `server/services/cryptocrawl/validate-swarm.ts` — Intra-repository dependency or independent status not conclusively verified.
+1096. `server/services/cryptocrawl/validation/index.ts` — Intra-repository dependency or independent status not conclusively verified.
+1097. `server/services/cryptocrawl/validation/monte-carlo-calibration-store.ts` — Imports code outside the trading candidate set.
+1098. `server/services/cryptocrawl/validation/monte-carlo-engine.ts` — Imports code outside the trading candidate set.
+1099. `server/services/cryptocrawl/validation/monte-carlo-hyper-engine.ts` — Intra-repository dependency or independent status not conclusively verified.
+1100. `server/services/cryptocrawl/validation/monte-carlo-policy.ts` — Intra-repository dependency or independent status not conclusively verified.
+1101. `server/services/cryptocrawl/validation/multi-oracle-validator.ts` — Imports code outside the trading candidate set.
+1102. `server/services/cryptocrawl/validation/order-book-evolution-store.ts` — Intra-repository dependency or independent status not conclusively verified.
+1103. `server/services/cryptocrawl/validation/runtime-confidence-bootstrap.ts` — Intra-repository dependency or independent status not conclusively verified.
+1104. `server/services/cryptocrawl/validation/verify-hyper-quanti-admission.ts` — Intra-repository dependency or independent status not conclusively verified.
+1105. `server/services/cryptocrawl/validation/verify-hyper-shared-data-fabric.ts` — Intra-repository dependency or independent status not conclusively verified.
+1106. `server/services/cryptocrawl/verification/canonicalCryptoVerifier.ts` — Referenced/imported from outside the trading candidate set.
+1107. `server/services/cryptocrawl/wallet/.wallet.enc.json` — Sensitive wallet/credentials: not eligible for public transfer.
+1108. `server/services/cryptocrawl/wallet/wallet-generator.ts` — Sensitive wallet/credentials: not eligible for public transfer.
+1109. `server/services/geoconsole/monteCarloPathEngine.ts` — LegalWhat component or ambiguous shared naming.
+1110. `server/services/inmateSearch/__tests__/MonteCarloInmateTest.ts` — LegalWhat component or ambiguous shared naming.
+1111. `server/services/monteCarlo/EvolutionaryCycleEngine.ts` — Imports code outside the trading candidate set.
+1112. `server/services/monteCarlo/index.ts` — Referenced/imported from outside the trading candidate set.
+1113. `server/services/monteCarlo/MonteCarloConfig.ts` — Intra-repository dependency or independent status not conclusively verified.
+1114. `server/services/monteCarlo/MonteCarloCrawlerOptimizer.ts` — Imports code outside the trading candidate set.
+1115. `server/services/monteCarlo/MonteCarloEngine.ts` — Intra-repository dependency or independent status not conclusively verified.
+1116. `server/services/peopleSearch/router/__tests__/MonteCarloEngine.test.ts` — LegalWhat component or ambiguous shared naming.
+1117. `server/services/peopleSearch/router/MonteCarloEngine.ts` — LegalWhat component or ambiguous shared naming.
+1118. `server/services/quantiComp/adaptiveOptimizer.ts` — Intra-repository dependency or independent status not conclusively verified.
+1119. `server/services/quantiComp/adaptiveRuntime.ts` — Intra-repository dependency or independent status not conclusively verified.
+1120. `server/services/quantiComp/backendRegistry.ts` — Intra-repository dependency or independent status not conclusively verified.
+1121. `server/services/quantiComp/backendRuntime.ts` — Intra-repository dependency or independent status not conclusively verified.
+1122. `server/services/quantiComp/dataFabric.ts` — Intra-repository dependency or independent status not conclusively verified.
+1123. `server/services/quantiComp/index.ts` — Intra-repository dependency or independent status not conclusively verified.
+1124. `server/services/quantiComp/interactionModel.ts` — Intra-repository dependency or independent status not conclusively verified.
+1125. `server/services/quantiComp/parallelismGovernor.ts` — Intra-repository dependency or independent status not conclusively verified.
+1126. `server/services/quantiComp/resourceProfiler.ts` — Intra-repository dependency or independent status not conclusively verified.
+1127. `server/services/quantiComp/runtime.ts` — Intra-repository dependency or independent status not conclusively verified.
+1128. `server/services/quantiComp/testing/verify-quanti-adaptive.ts` — Intra-repository dependency or independent status not conclusively verified.
+1129. `server/services/quantiComp/testing/verify-quanti-backends.ts` — Intra-repository dependency or independent status not conclusively verified.
+1130. `server/services/quantiComp/testing/verify-quanti-comp.ts` — Intra-repository dependency or independent status not conclusively verified.
+1131. `server/services/quantiComp/testing/verify-quanti-data-fabric.ts` — Intra-repository dependency or independent status not conclusively verified.
+1132. `server/services/quantiComp/testing/verify-quanti-parallelism.ts` — Intra-repository dependency or independent status not conclusively verified.
+1133. `server/services/quantiComp/types.ts` — Intra-repository dependency or independent status not conclusively verified.
+1134. `services/cryptocrawler-executor/index.ts` — Imports code outside the trading candidate set.
+1135. `supabase/functions/cryptocrawler-terminal-sweeper/index.ts` — Database migration or service; integration not proven independent.
+1136. `supabase/functions/cryptocrawler-terminal-sweeper/okx.ts` — Database migration or service; integration not proven independent.
+1137. `supabase/functions/cryptocrawler-terminal-sweeper/payouts.ts` — Database migration or service; integration not proven independent.
+1138. `supabase/functions/cryptocrawler-terminal-sweeper/shared.ts` — Database migration or service; integration not proven independent.
+1139. `supabase/functions/cryptocrawler-terminal-sweeper/terminal.ts` — Database migration or service; integration not proven independent.
 
 ## Summary by primary reason
 
@@ -1215,6 +1216,7 @@ Audit methods: TypeScript AST import/export analysis; direct and reverse depende
 | LegalWhat component or ambiguous shared naming | 12 |
 | External code/configuration/document reference remains | 6 |
 | Sensitive wallet/credentials: not eligible for public transfer | 2 |
+| Reads retained computational Beam source files dynamically (main.ts, index.ts and README.md); must remain in Bad-Blue | 1 |
 | Dynamically loaded by a retained CryptoCrawler module (server/services/cryptocrawl/core/wallet.ts) | 1 |
 
-**The Bad-Blue development and production branches are unchanged. Approved deletions may only be staged in a separate unmerged branch after two post-copy verifications.**
+**No Bad-Blue merge or Railway deployment has been authorized or performed.**
