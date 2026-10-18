@@ -1,4 +1,4 @@
-# Transferred T.H.W.A.R.T. files (83)
+# Transferred T.H.W.A.R.T. files (84)
 
 - `archive/admin/cryptocrawler-admin-polling.ts`
 - `archive/admin/cryptocrawler-admin-types.ts`
@@ -77,6 +77,7 @@
 - `server/services/cryptocrawl/ui/dashboard-client.js`
 - `server/services/cryptocrawl/ui/dashboard.html`
 - `server/services/cryptocrawl/ui/README.md`
+- `server/services/genie-controller/cryptara-permission-defaults.md`
 - `shared/cryptaraConfig.ts`
 - `shared/cryptaraMultiplierSystem.ts`
 - `shared/cryptaraPersistence.ts`
