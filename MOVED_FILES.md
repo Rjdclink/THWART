@@ -1,17 +1,16 @@
-# Transferred T.H.W.A.R.T. files (41)
+# Transferred T.H.W.A.R.T. files (42)
 
 - `CRYPTOCRAWL_IMPLEMENTATION_SUMMARY.md`
+- `db/migrations/0022_cryptocrawl_flashbots_auth_identity.sql`
 - `docs/ARIES_EDGE_FORMATION_REACTOR.md`
-- `docs/CRYPTOCRAWLER_KALSHI_RUNBOOK.md`
-- `docs/CRYPTOCRAWLER_STAGED_GOVERNANCE.md`
 - `docs/cryptocrawl/bps-reduction-repair-evidence.md`
 - `docs/cryptocrawl/scan-liveness-repair-evidence.md`
+- `docs/CRYPTOCRAWLER_KALSHI_RUNBOOK.md`
+- `docs/CRYPTOCRAWLER_STAGED_GOVERNANCE.md`
 - `docs/cryptocrawler/BPS_FEE_RECOVERY_COMPLETION_20260905.md`
 - `scripts/cryptocrawl/verify-maker-taker-policy.ts`
 - `server/services/cryptocrawl/ADVANCED_SYSTEM_README.md`
 - `server/services/cryptocrawl/CONJOINED_TWIN_IMPLEMENTATION.md`
-- `server/services/cryptocrawl/PR5_IMPLEMENTATION.md`
-- `server/services/cryptocrawl/README.md`
 - `server/services/cryptocrawl/enhancements/snowball-mods.ts`
 - `server/services/cryptocrawl/execution/maker-taker-policy.ts`
 - `server/services/cryptocrawl/governance/OPERATIONAL_RUNBOOK.md`
@@ -20,12 +19,14 @@
 - `server/services/cryptocrawl/mev/index.ts`
 - `server/services/cryptocrawl/mev/validator-bribing-advanced.ts`
 - `server/services/cryptocrawl/mev/validator-bribing.ts`
-- `server/services/cryptocrawl/scanners/README.md`
+- `server/services/cryptocrawl/PR5_IMPLEMENTATION.md`
+- `server/services/cryptocrawl/README.md`
 - `server/services/cryptocrawl/scanners/elite-arbitrage-scanner.ts`
-- `server/services/cryptocrawl/stealth/PERFECTION_SUMMARY.md`
-- `server/services/cryptocrawl/stealth/README.md`
+- `server/services/cryptocrawl/scanners/README.md`
 - `server/services/cryptocrawl/stealth/config.ts`
 - `server/services/cryptocrawl/stealth/index.ts`
+- `server/services/cryptocrawl/stealth/PERFECTION_SUMMARY.md`
+- `server/services/cryptocrawl/stealth/README.md`
 - `server/services/cryptocrawl/stealth/telemetry.ts`
 - `server/services/cryptocrawl/strategies/cbvh-protocol.ts`
 - `server/services/cryptocrawl/testing/estimate-computing-power.js`
