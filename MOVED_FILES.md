@@ -1,5 +1,6 @@
-# Transferred T.H.W.A.R.T. files (50)
+# Transferred T.H.W.A.R.T. files (51)
 
+- `client/src/components/cryptocrawler-admin-tile.md`
 - `client/src/components/cryptocrawler-master-panel.ts`
 - `contracts/cryptocrawl/README.md`
 - `CRYPTOCRAWL_IMPLEMENTATION_SUMMARY.md`
