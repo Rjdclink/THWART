@@ -1,4 +1,4 @@
-# Transferred T.H.W.A.R.T. files (61)
+# Transferred T.H.W.A.R.T. files (62)
 
 - `archive/genie/cryptara-admin-excerpts.md`
 - `archive/genie/cryptara-controller-excerpts.md`
@@ -21,6 +21,7 @@
 - `docs/CRYPTOCRAWLER_STAGED_GOVERNANCE.md`
 - `docs/cryptocrawler/BPS_FEE_RECOVERY_COMPLETION_20260905.md`
 - `scripts/cryptocrawl/verify-maker-taker-policy.ts`
+- `server/routes/arbitrageAgents.routes.ts`
 - `server/services/cryptocrawl/ADVANCED_SYSTEM_README.md`
 - `server/services/cryptocrawl/CONJOINED_TWIN_IMPLEMENTATION.md`
 - `server/services/cryptocrawl/enhancements/snowball-mods.ts`
