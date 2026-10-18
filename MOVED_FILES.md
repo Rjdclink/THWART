@@ -1,4 +1,4 @@
-# Transferred T.H.W.A.R.T. files (76)
+# Transferred T.H.W.A.R.T. files (77)
 
 - `archive/admin/cryptocrawler-admin-polling.ts`
 - `archive/admin/cryptocrawler-admin-types.ts`
@@ -32,6 +32,7 @@
 - `docs/extracted-cryptocrawler-bootstrap.md`
 - `scripts/cryptocrawl/verify-maker-taker-policy.ts`
 - `server/routes/arbitrageAgents.routes.ts`
+- `server/routes/cryptocrawl-faucet.health.ts`
 - `server/routes/cryptoWiring.routes.ts`
 - `server/services/cryptocrawl/ADVANCED_SYSTEM_README.md`
 - `server/services/cryptocrawl/api/bridge-api.ts`
