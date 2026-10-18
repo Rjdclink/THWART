@@ -1,4 +1,4 @@
-# Transferred T.H.W.A.R.T. files (58)
+# Transferred T.H.W.A.R.T. files (61)
 
 - `archive/genie/cryptara-admin-excerpts.md`
 - `archive/genie/cryptara-controller-excerpts.md`
@@ -52,6 +52,9 @@
 - `server/services/cryptocrawl/testing/run-realworld-optimization.js`
 - `server/services/cryptocrawl/testing/run-zero-capital-optimization.js`
 - `server/services/cryptocrawl/testing/verify-profit-routing.ts`
+- `server/services/cryptocrawl/ui/dashboard-client.js`
+- `server/services/cryptocrawl/ui/dashboard.html`
+- `server/services/cryptocrawl/ui/README.md`
 - `shared/cryptaraConfig.ts`
 - `shared/cryptaraMultiplierSystem.ts`
 - `shared/cryptaraPersistence.ts`
