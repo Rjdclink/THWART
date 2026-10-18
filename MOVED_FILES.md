@@ -1,5 +1,8 @@
-# Transferred T.H.W.A.R.T. files (55)
+# Transferred T.H.W.A.R.T. files (58)
 
+- `archive/genie/cryptara-admin-excerpts.md`
+- `archive/genie/cryptara-controller-excerpts.md`
+- `archive/genie/cryptara-route-excerpts.md`
 - `client/src/components/bps-activity-terminal.tsx`
 - `client/src/components/cryptocrawler-admin-tile.md`
 - `client/src/components/cryptocrawler-master-panel.ts`
