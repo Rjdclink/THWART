@@ -1,4 +1,4 @@
-# Transferred T.H.W.A.R.T. files (72)
+# Transferred T.H.W.A.R.T. files (73)
 
 - `archive/admin/cryptocrawler-admin-polling.ts`
 - `archive/admin/cryptocrawler-admin-types.ts`
@@ -6,6 +6,7 @@
 - `archive/admin/cryptocrawler-faucet-panel.tsx`
 - `archive/admin/cryptocrawler-state.ts`
 - `archive/admin/cryptocrawler-system-status-panel.tsx`
+- `archive/brains/cryptara-cognitive-domain.ts`
 - `archive/genie/cryptara-admin-excerpts.md`
 - `archive/genie/cryptara-controller-excerpts.md`
 - `archive/genie/cryptara-route-excerpts.md`
