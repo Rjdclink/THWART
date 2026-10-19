@@ -1,0 +1,83 @@
+const fs = require('node:fs');
+const assert = require('node:assert/strict');
+
+const makerAdapters = fs.readFileSync('server/services/cryptocrawl/execution/post-only-maker-adapters.ts', 'utf8');
+const makerStrategy = fs.readFileSync('server/services/cryptocrawl/execution/stablecoin-maker-strategy.ts', 'utf8');
+const barrier = fs.readFileSync('server/services/cryptocrawl/discovery/cex-economic-barrier-policy.ts', 'utf8');
+const coinbase = fs.readFileSync('server/services/cryptocrawl/intelligence/coinbase-advanced-trade-authority.ts', 'utf8');
+const funding = fs.readFileSync('server/services/cryptocrawl/discovery/funding-rate-monitor.ts', 'utf8');
+const positiveProfit = fs.readFileSync('server/services/cryptocrawl/runtime/positive-profit-capture-wiring.ts', 'utf8');
+const zeroX = fs.readFileSync('server/services/cryptocrawl/intelligence/market-data-providers.ts', 'utf8');
+
+// Volatile maker recovery remains a first-class executable adapter path, but no
+// arbitrary BPS floor may override strict positive all-in dollar economics.
+assert.match(makerStrategy, /'volatile_spread_post_only'/);
+assert.doesNotMatch(makerStrategy, /CRYPTO_ARBITRAGE_VOLATILE_MAKER_MIN_GROSS_SPREAD_BPS/);
+assert.doesNotMatch(makerStrategy, /grossSpreadBps\s*<\s*volatileFloorBps/);
+assert.match(makerStrategy, /volatileMinGrossSpreadBps:\s*null/);
+assert.match(makerStrategy, /CEX_VENUES[^=]*=\s*\['coinbase',\s*'kraken',\s*'okx'\]/);
+assert.match(makerAdapters, /type \{ MakerRecoveryPlan \}/);
+assert.match(makerAdapters, /createPostOnlyMakerAdapters\(plan: MakerRecoveryPlan\)/);
+assert.doesNotMatch(barrier, /outside the installed Kraken\/OKX stablecoin post-only path/);
+
+// Coinbase must prefer the documented organizations/.../apiKeys/... Key Name
+// rather than letting an overloaded generic API key shadow it.
+assert.match(coinbase, /COINBASE_KEY_NAME/);
+assert.match(coinbase, /candidates\.find\(value => value\.includes\('\/apiKeys\/'\)\)/);
+assert.match(coinbase, /refusing to send a JWT with an ambiguous key identifier/);
+assert.match(coinbase, /Coinbase private authentication failed/);
+
+// A measured 401/403 must fail closed and open a bounded account-level cooldown,
+// preventing the same invalid authority from being hammered once per symbol.
+assert.match(coinbase, /AUTH_FAILURE_COOLDOWN_MS/);
+assert.match(coinbase, /CoinbasePrivateAuthError/);
+assert.match(coinbase, /CoinbaseAuthCircuitOpenError/);
+assert.match(coinbase, /assertCoinbaseAuthCircuitClosed\(\)/);
+assert.match(coinbase, /recordCoinbaseAuthFailure\(response\.status\)/);
+assert.match(coinbase, /permissionsCache = null/);
+assert.match(coinbase, /authCircuitOpen/);
+assert.match(coinbase, /Private authentication circuit opened after authoritative rejection/);
+assert.match(coinbase, /assertCoinbaseSpotTradeReady/);
+assert.doesNotMatch(coinbase, /configuredFee|configured_override/);
+
+// Recovery logging is transition-based rather than success-request-based.
+assert.match(coinbase, /let authRecoveryLoggedFailureCount = 0/);
+assert.match(coinbase, /authFailureCount > authRecoveryLoggedFailureCount/);
+assert.match(coinbase, /authRecoveryLoggedFailureCount = authFailureCount/);
+assert.doesNotMatch(
+  coinbase,
+  /if \(authCooldownUntil !== null \|\| lastAuthFailureAt !== null\)/,
+  'historical failure state must not emit recovery on every successful request',
+);
+
+// OKX funding enrichment must share/cached account context rather than issuing
+// account instruments + config reads independently for every observation.
+assert.match(funding, /getOkxSwapAccountContext/);
+assert.match(funding, /OKX_SWAP_CONTEXT_TTL_MS/);
+assert.match(funding, /okxSwapContextInFlight/);
+assert.match(funding, /lane: 'account_read'/);
+assert.match(funding, /lane: 'trade_fee'/);
+
+// 0x remains on the official v2 AllowanceHolder route while Railway credential
+// aliases and accidental wrapping quotes are normalized before use.
+assert.match(zeroX, /api\.0x\.org\/swap\/allowance-holder/);
+assert.match(zeroX, /'0x-version': 'v2'/);
+assert.match(positiveProfit, /normalizedEnvValue/);
+assert.match(positiveProfit, /ZEROX_API_KEY/);
+assert.match(positiveProfit, /0X_API_KEY/);
+
+console.log(JSON.stringify({
+  postAriesRuntimeRecovery: 'verified',
+  volatileMakerAdapterGeneralized: true,
+  arbitraryMakerBpsFloor: false,
+  canonicalMakerVenues: ['coinbase', 'kraken', 'okx'],
+  staleStablecoinOnlyBarrierRemoved: true,
+  coinbaseCanonicalKeyNamePreferred: true,
+  coinbase401DiagnosticsImproved: true,
+  coinbaseAuthCircuitFailClosed: true,
+  coinbaseAuthStormSuppressed: true,
+  coinbaseRecoveryTransitionLogBounded: true,
+  okxFundingAccountReadsCoalesced: true,
+  zeroXOfficialV2AllowanceHolderRetained: true,
+  zeroXCredentialNormalizationHardened: true,
+}, null, 2));

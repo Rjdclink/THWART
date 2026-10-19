@@ -1,0 +1,587 @@
+import { MultiRelaySubmitter } from './multi-relay-submitter.js';
+import { FlashLoanAggregator } from './flash-loan-aggregator.js';
+import { UltraLowLatencyExecutor } from './ultra-low-latency-executor.js';
+import logger from '../../../logger.js';
+import { getCryptocrawlGovernance } from '../governance/index.js';
+import { getCryptara, type CryptaraExecutionFeedback } from '../../cryptara/index.js';
+import { recordCryptaraExecutionEvidence } from '../governance/automatic-stage-progression.js';
+import { centralizedExchangeExecutor, type ArbitrageExecutionResult } from './centralized-exchange-executor.js';
+import type { QuoteVenue, VerifiedArbitragePlan } from '../arbitrage/arbitrage-verifier.js';
+import { buildOnchainPayloadFromPlan, type OnchainExecutionPlan } from './adapters/onchain-payload-builder.js';
+import { DexSettlementObserver, type DexSettlementPriceContext } from './dex-settlement-observer.js';
+import type { NormalizedRealizedExecution } from './settlement-types.js';
+import { multiProviderRpcManager, type SupportedChain } from '../api/blockchain-providers.js';
+import { normalizePrivateKey, walletFromPrivateKey } from '../core/wallet-identity.js';
+import {
+  assessCanonicalExecutionEnvironment,
+  getCanonicalExecutionCapabilities,
+  type CanonicalExecutionCapabilities,
+  type CanonicalExecutionEnvironmentReadiness,
+} from './execution-readiness.js';
+
+interface OpportunityData {
+  to: string;
+  data: string;
+  value: string;
+  gasLimit: number;
+}
+
+interface Opportunity {
+  id: string;
+  asset: string;
+  chain: string;
+  profit: number;
+  type: 'simple' | 'triangle' | 'quadrilateral' | 'cross-chain';
+  requiresFlashLoan?: boolean;
+  flashLoanAmount?: number;
+  pair?: string;
+  payload?: OpportunityData;
+  onchainPlan?: OnchainExecutionPlan;
+  expectedFeeUsd?: number;
+  expectedSlippageBps?: number;
+  usedZeroCapital?: boolean;
+  skipCryptaraFeedback?: boolean;
+  settlement?: {
+    walletAddress?: string;
+    tokenIn?: string;
+    tokenOut?: string;
+    inputAmountBaseUnits?: string;
+    expectedOutputAmountBaseUnits?: string;
+    inputTokenDecimals?: number;
+    outputTokenDecimals?: number;
+    prices?: DexSettlementPriceContext;
+  };
+}
+
+interface ExecutionResult {
+  success: boolean;
+  status: 'submitted' | 'partially_filled' | 'filled' | 'cancelled' | 'rejected' | 'failed' | 'settlement_unknown';
+  settlementConfirmed: boolean;
+  txHash?: string;
+  signedTransaction?: string;
+  profit?: number;
+  latency?: number;
+  method?: string;
+  relaySubmissions?: any;
+  normalized?: NormalizedRealizedExecution;
+  error?: string;
+}
+
+/**
+ * Legacy compatibility names only. The canonical execution-readiness module is
+ * the sole authority for capability and environment readiness semantics.
+ */
+export type SharedExecutionCapabilities = CanonicalExecutionCapabilities;
+export type SharedExecutionEnvironmentReadiness = CanonicalExecutionEnvironmentReadiness;
+
+const PLACEHOLDER_OPPORTUNITY_PAYLOAD: OpportunityData = {
+  to: '0x0000000000000000000000000000000000000001',
+  data: '0x',
+  value: '0',
+  gasLimit: 500000,
+};
+
+function normalizeChain(chain: string): string {
+  return String(chain || 'unknown').trim().toLowerCase();
+}
+
+function isSupportedCentralizedVenue(venue: QuoteVenue): venue is 'coinbase' | 'kraken' | 'okx' {
+  return venue === 'coinbase' || venue === 'kraken' || venue === 'okx';
+}
+
+function resolveOpportunityPayload(opp: Opportunity): OpportunityData {
+  if (opp.payload) {
+    return opp.payload;
+  }
+
+  if (opp.onchainPlan) {
+    return buildOnchainPayloadFromPlan(opp.onchainPlan);
+  }
+
+  if (process.env.CRYPTO_ARBITRAGE_LIVE_EXECUTION === 'true') {
+    throw new Error(
+      'Live on-chain execution requires opportunity.payload or opportunity.onchainPlan; the autonomous plan-to-payload adapter is not implemented for executeWithMaxProfit()',
+    );
+  }
+
+  if (process.env.CRYPTO_ALLOW_PLACEHOLDER_EXECUTION !== 'true') {
+    throw new Error(
+      'Explicit opportunity.payload is required. Set CRYPTO_ALLOW_PLACEHOLDER_EXECUTION=true only for non-production dry runs that intentionally use placeholder transaction payloads.',
+    );
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Placeholder transaction payloads are forbidden in production');
+  }
+
+  return PLACEHOLDER_OPPORTUNITY_PAYLOAD;
+}
+
+function resolveSettlementWalletAddress(explicitAddress?: string): string {
+  if (explicitAddress?.trim()) return explicitAddress.trim();
+  const configuredAddress = process.env.WALLET_ADDRESS?.trim();
+  if (configuredAddress) return configuredAddress;
+  const privateKey = normalizePrivateKey(process.env.WALLET_PRIVATE_KEY);
+  if (!privateKey) throw new Error('WALLET_ADDRESS or WALLET_PRIVATE_KEY is required for DEX settlement observation');
+  return walletFromPrivateKey(privateKey).address;
+}
+
+async function observeDexSettlement(opp: Opportunity, txHash: string): Promise<{
+  success: boolean;
+  status: NonNullable<ExecutionResult['status']>;
+  settlementConfirmed: boolean;
+  normalized: NormalizedRealizedExecution;
+  error?: string;
+}> {
+  if (!opp.onchainPlan && !opp.settlement) {
+    throw new Error('DEX settlement metadata is required to observe an on-chain execution');
+  }
+  const chain = normalizeChain(opp.chain);
+  if (!['ethereum', 'polygon', 'arbitrum', 'optimism', 'base', 'avalanche', 'bsc'].includes(chain)) {
+    throw new Error(`Unsupported chain for DEX settlement observation: ${chain}`);
+  }
+  await multiProviderRpcManager.initialize([chain as SupportedChain]);
+  const { http: provider } = await multiProviderRpcManager.getProvider(chain as SupportedChain, 'receipts');
+  const firstLeg = opp.onchainPlan?.legs[0];
+  const settlement = opp.settlement || {};
+  const observer = new DexSettlementObserver(provider);
+  return observer.observe({
+    txHash,
+    chain,
+    walletAddress: resolveSettlementWalletAddress(settlement.walletAddress),
+    plan: opp.onchainPlan,
+    tokenIn: settlement.tokenIn || firstLeg?.tokenIn,
+    tokenOut: settlement.tokenOut || firstLeg?.tokenOut,
+    inputAmountBaseUnits: settlement.inputAmountBaseUnits || firstLeg?.amountIn,
+    expectedOutputAmountBaseUnits: settlement.expectedOutputAmountBaseUnits,
+    inputTokenDecimals: settlement.inputTokenDecimals,
+    outputTokenDecimals: settlement.outputTokenDecimals,
+    prices: settlement.prices,
+    predictedProfitUsd: opp.profit,
+    predictedFeeUsd: opp.expectedFeeUsd ?? null,
+    predictedSlippageBps: opp.expectedSlippageBps ?? null,
+  });
+}
+
+function shouldBlockForDirective(opp: Opportunity): string | null {
+  const directive = getCryptara().getAutonomousDirective();
+  const normalizedChain = normalizeChain(opp.chain);
+
+  if (
+    directive.riskBudget === 'defensive' &&
+    directive.preferredChains.length > 0 &&
+    !directive.preferredChains.includes(normalizedChain)
+  ) {
+    return `Autonomous directive is defensive and does not currently prefer chain ${normalizedChain}`;
+  }
+
+  if (!Number.isFinite(opp.profit) || opp.profit <= 0) {
+    return 'Expected net profit must be positive after all verified execution costs';
+  }
+
+  if (opp.requiresFlashLoan && !directive.preferredExecutionModes.includes('zero_capital')) {
+    return 'Autonomous directive does not currently prefer zero-capital execution';
+  }
+
+  return null;
+}
+
+async function recordCryptaraExecutionFeedback(feedback: CryptaraExecutionFeedback): Promise<void> {
+  try {
+    await recordCryptaraExecutionEvidence(feedback);
+  } catch (error) {
+    logger.warn('Failed to record Cryptara execution feedback', {
+      component: 'ExecutionOrchestrator',
+      error: error instanceof Error ? error.message : String(error),
+      symbol: feedback.symbol,
+      strategy: feedback.strategy,
+    });
+  }
+}
+
+function measuredSettlementFeeUsd(economics: NormalizedRealizedExecution['realized'] | undefined): number | null {
+  if (!economics) return null;
+  const measuredCosts = [economics.exchangeFeeUsd, economics.gasUsd]
+    .filter((value): value is number => value !== null && Number.isFinite(value));
+  return measuredCosts.length > 0 ? measuredCosts.reduce((sum, value) => sum + value, 0) : null;
+}
+
+/** @deprecated Compatibility shim; use getCanonicalExecutionCapabilities(). */
+export function getSharedExecutionCapabilities(): SharedExecutionCapabilities {
+  return getCanonicalExecutionCapabilities();
+}
+
+/** @deprecated Compatibility shim; use assessCanonicalExecutionEnvironment(). */
+export function assessSharedExecutionEnvironment(): SharedExecutionEnvironmentReadiness {
+  return assessCanonicalExecutionEnvironment();
+}
+
+// Create singleton instances
+export const multiRelay = new MultiRelaySubmitter();
+export const flashLoans = new FlashLoanAggregator();
+export const ultraLowLatency = new UltraLowLatencyExecutor();
+
+// Unified execution function that combines all systems
+export async function executeWithMaxProfit(opp: Opportunity): Promise<ExecutionResult> {
+  const governance = getCryptocrawlGovernance();
+  // Hard gate: deny-by-default unless explicitly UNPAUSED inside an envelope.
+  governance.requireAllowed('EXECUTE_OPPORTUNITY', { chain: opp.chain, pair: opp.pair || opp.asset });
+
+  if (process.env.NO_EXECUTION === 'true') {
+    return {
+      success: false,
+      status: 'failed',
+      settlementConfirmed: false,
+      error: 'Execution disabled by NO_EXECUTION=true safety guard',
+    };
+  }
+
+  if (opp.requiresFlashLoan) {
+    return {
+      success: false,
+      status: 'failed',
+      settlementConfirmed: false,
+      error: 'Flash-loan execution is unavailable: the configured aggregator does not provide atomic borrow, repayment, and settlement verification',
+    };
+  }
+
+  const directiveBlockReason = shouldBlockForDirective(opp);
+  if (directiveBlockReason) {
+    logger.warn('Execution blocked by Cryptara autonomous directive', {
+      component: 'ExecutionOrchestrator',
+      opportunityId: opp.id,
+      chain: opp.chain,
+      pair: opp.pair || opp.asset,
+      reason: directiveBlockReason,
+    });
+    return {
+      success: false,
+      status: 'rejected',
+      settlementConfirmed: false,
+      error: directiveBlockReason,
+    };
+  }
+
+  logger.info('Executing opportunity with max profit strategy', {
+    component: 'ExecutionOrchestrator',
+    opportunityId: opp.id,
+    type: opp.type,
+    profit: opp.profit,
+    requiresFlashLoan: opp.requiresFlashLoan
+  });
+
+  try {
+    // Live execution implies transaction submission. Gate again with chain context.
+    governance.requireAllowed('SUBMIT_TX', { chain: opp.chain, pair: opp.pair || opp.asset });
+    governance.recordExecutionAttempt();
+
+    // Initialize systems if needed
+    await multiRelay.initialize();
+    await ultraLowLatency.initialize();
+
+    const oppData = resolveOpportunityPayload(opp);
+
+    let executionResult: ExecutionResult;
+
+    // The generic on-chain executor confirms broadcast acceptance only. A
+    // receipt and settlement observer must provide realized economics later.
+    logger.debug('Using ultra-low-latency executor (settlement pending)', {
+      component: 'ExecutionOrchestrator',
+      opportunityId: opp.id
+    });
+
+    const result = await ultraLowLatency.executeMultiPath(oppData);
+    const signedTransaction = typeof (result as any).signedTransaction === 'string'
+      ? (result as any).signedTransaction as string
+      : undefined;
+    executionResult = {
+      success: result.success,
+      status: result.success ? 'submitted' : 'failed',
+      settlementConfirmed: false,
+      txHash: result.txHash,
+      signedTransaction,
+      latency: result.latency,
+      method: result.method,
+    };
+
+    // A bundle requires signed raw transaction bytes, never a transaction hash.
+    // The same signed payload may be submitted to private builders only when the
+    // low-latency executor exposes it; otherwise the successful multipath
+    // broadcast remains authoritative and no synthetic bundle is constructed.
+    if (executionResult.success && executionResult.signedTransaction) {
+      const currentBlock = await getCurrentBlock();
+      const targetBlock = currentBlock + 1;
+
+      const relayResult = await multiRelay.submitBundle(
+        {
+          signedTransactions: [executionResult.signedTransaction],
+          targetBlock
+        },
+        targetBlock
+      );
+
+      executionResult.relaySubmissions = relayResult;
+
+      logger.info('Signed transaction submitted to private relay builders', {
+        component: 'ExecutionOrchestrator',
+        submitted: relayResult.submitted,
+        successful: relayResult.successful
+      });
+    }
+
+    if (executionResult.success && executionResult.txHash && (opp.onchainPlan || opp.settlement)) {
+      try {
+        const settlement = await observeDexSettlement(opp, executionResult.txHash);
+        executionResult = {
+          ...executionResult,
+          success: settlement.success,
+          status: settlement.status,
+          settlementConfirmed: settlement.settlementConfirmed,
+          normalized: settlement.normalized,
+          profit: settlement.normalized.realized.netProfitUsd ?? undefined,
+          error: settlement.error,
+        };
+      } catch (error) {
+        executionResult = {
+          ...executionResult,
+          status: 'settlement_unknown',
+          settlementConfirmed: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+        logger.warn('On-chain execution was submitted but settlement observation is unavailable', {
+          component: 'ExecutionOrchestrator',
+          opportunityId: opp.id,
+          txHash: executionResult.txHash,
+          error: executionResult.error,
+        });
+      }
+    }
+
+    if (executionResult.success && executionResult.settlementConfirmed) {
+      logger.info('Opportunity executed and settled successfully', {
+        component: 'ExecutionOrchestrator',
+        opportunityId: opp.id,
+        profit: executionResult.profit,
+        method: executionResult.method
+      });
+    } else if (executionResult.success) {
+      logger.info('Opportunity submitted; settlement is pending', {
+        component: 'ExecutionOrchestrator',
+        opportunityId: opp.id,
+        txHash: executionResult.txHash,
+        method: executionResult.method,
+      });
+    } else {
+      logger.warn('Opportunity execution failed', {
+        component: 'ExecutionOrchestrator',
+        opportunityId: opp.id,
+        method: executionResult.method
+      });
+    }
+
+    const realizedEconomics = executionResult.normalized?.realized;
+    const terminalSettlement = executionResult.normalized?.terminal === true;
+    if (!opp.skipCryptaraFeedback && terminalSettlement) {
+      await recordCryptaraExecutionFeedback({
+        source: opp.requiresFlashLoan ? 'flash_loan' : 'manual',
+        opportunityId: opp.id,
+        chain: normalizeChain(opp.chain),
+        symbol: opp.pair || opp.asset,
+        strategy: opp.type,
+        success: executionResult.success,
+        expectedProfitUsd: executionResult.normalized?.predicted.profitUsd ?? opp.profit,
+        realizedProfitUsd: realizedEconomics?.netProfitUsd ?? null,
+        feeUsd: measuredSettlementFeeUsd(realizedEconomics),
+        slippageBps: realizedEconomics?.slippageBps ?? null,
+        latencyMs: executionResult.latency || 0,
+        usedZeroCapital: opp.usedZeroCapital ?? !!opp.requiresFlashLoan,
+        timestamp: Date.now(),
+        settlementStatus: executionResult.normalized?.status,
+        settlementConfirmed: executionResult.normalized?.settlementConfirmed,
+        provenance: executionResult.normalized?.provenance,
+        settlement: executionResult.normalized,
+        notes: executionResult.error,
+      });
+    } else if (!opp.skipCryptaraFeedback && !terminalSettlement) {
+      logger.warn('Execution settlement is not terminal; deferring Cryptara feedback', {
+        component: 'ExecutionOrchestrator',
+        opportunityId: opp.id,
+        expectedProfitUsd: opp.profit,
+        status: executionResult.status,
+        settlementConfirmed: executionResult.settlementConfirmed,
+        realizedProfitUsd: realizedEconomics?.netProfitUsd ?? null,
+        gasUsd: realizedEconomics?.gasUsd ?? null,
+        slippageBps: realizedEconomics?.slippageBps ?? null,
+        error: executionResult.error,
+      });
+    }
+
+    return executionResult;
+  } catch (error) {
+    logger.error('Execution error', {
+      component: 'ExecutionOrchestrator',
+      opportunityId: opp.id,
+      error: error instanceof Error ? error.message : String(error)
+    });
+
+    return {
+      success: false,
+      status: 'failed',
+      settlementConfirmed: false,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+export async function executeVerifiedArbitragePlan(
+  plan: VerifiedArbitragePlan,
+  options?: {
+    opportunityId?: string;
+    chain?: string;
+    source?: CryptaraExecutionFeedback['source'];
+    observedSlippageBps?: number;
+    realizedProfitUsd?: number;
+  },
+): Promise<ArbitrageExecutionResult & { latencyMs: number; netExpectedProfitUsd: number }> {
+  const governance = getCryptocrawlGovernance();
+  const canonicalOpportunityId = options?.opportunityId?.trim() || null;
+  if (options?.source === 'master_pipeline' && !canonicalOpportunityId) {
+    return {
+      success: false,
+      status: 'rejected',
+      settlementConfirmed: false,
+      error: 'Canonical execution requires the exact opportunityId so settlement and learning remain bound to one lifecycle',
+      latencyMs: 0,
+      netExpectedProfitUsd: plan.netProfitUsd,
+    };
+  }
+  const feedbackOpportunityId = canonicalOpportunityId
+    || `compat:${plan.buyVenue}:${plan.sellVenue}:${plan.symbol}:${plan.buyAsk}:${plan.sellBid}:${plan.baseQty}`;
+
+  governance.requireAllowed('EXECUTE_OPPORTUNITY', { pair: plan.symbol, venue: plan.buyVenue });
+  governance.requireAllowed('EXECUTE_OPPORTUNITY', { pair: plan.symbol, venue: plan.sellVenue });
+
+  if (process.env.NO_EXECUTION === 'true') {
+    return {
+      success: false,
+      status: 'failed',
+      settlementConfirmed: false,
+      error: 'Execution disabled by NO_EXECUTION=true safety guard',
+      latencyMs: 0,
+      netExpectedProfitUsd: plan.netProfitUsd,
+    };
+  }
+
+  governance.requireAllowed('SUBMIT_TX', { pair: plan.symbol, venue: plan.buyVenue });
+  governance.requireAllowed('SUBMIT_TX', { pair: plan.symbol, venue: plan.sellVenue });
+  governance.recordExecutionAttempt();
+
+  const normalizedChain = normalizeChain(options?.chain || plan.bridge?.from || 'cex');
+  const directive = getCryptara().getAutonomousDirective();
+
+  if (
+    directive.riskBudget === 'defensive' &&
+    normalizedChain !== 'cex' &&
+    directive.preferredChains.length > 0 &&
+    !directive.preferredChains.includes(normalizedChain)
+  ) {
+    return {
+      success: false,
+      status: 'rejected',
+      settlementConfirmed: false,
+      error: `Autonomous directive is defensive and does not currently prefer chain ${normalizedChain}`,
+      latencyMs: 0,
+      netExpectedProfitUsd: plan.netProfitUsd,
+    };
+  }
+
+  if (!Number.isFinite(plan.netProfitUsd) || plan.netProfitUsd <= 0) {
+    return {
+      success: false,
+      status: 'rejected',
+      settlementConfirmed: false,
+      error: 'Verified all-in net profit must be positive after fees, gas, slippage, bridge, and execution costs',
+      latencyMs: 0,
+      netExpectedProfitUsd: plan.netProfitUsd,
+    };
+  }
+
+  if (!isSupportedCentralizedVenue(plan.buyVenue) || !isSupportedCentralizedVenue(plan.sellVenue)) {
+    return {
+      success: false,
+      status: 'rejected',
+      settlementConfirmed: false,
+      error: `Verified arbitrage plan requires unsupported live venue pairing ${plan.buyVenue}->${plan.sellVenue}; supported venues are ${getCanonicalExecutionCapabilities().supportedCentralizedVenues.join(', ')}`,
+      latencyMs: 0,
+      netExpectedProfitUsd: plan.netProfitUsd,
+    };
+  }
+
+  const startedAt = Date.now();
+  const result = await centralizedExchangeExecutor.execute(plan);
+  const latencyMs = Date.now() - startedAt;
+  const normalized = result.normalized;
+  const realizedProfitUsd = normalized?.realized.netProfitUsd;
+  const realizedFeeUsd = normalized?.realized.exchangeFeeUsd;
+  const realizedSlippageBps = normalized?.realized.slippageBps;
+  const settlementConfirmed = result.settlementConfirmed === true;
+  if (normalized?.terminal === true) {
+    await recordCryptaraExecutionFeedback({
+      source: options?.source || 'manual',
+      opportunityId: feedbackOpportunityId,
+      chain: normalizedChain,
+      symbol: plan.symbol,
+      strategy: 'verified_cex_arbitrage',
+      success: result.success,
+      expectedProfitUsd: normalized.predicted.profitUsd ?? plan.netProfitUsd,
+      realizedProfitUsd: realizedProfitUsd ?? null,
+      feeUsd: measuredSettlementFeeUsd(normalized.realized),
+      slippageBps: realizedSlippageBps ?? null,
+      latencyMs,
+      usedZeroCapital: false,
+      timestamp: Date.now(),
+      settlementStatus: normalized!.status,
+      settlementConfirmed: normalized!.settlementConfirmed,
+      provenance: [...new Set([...(normalized!.provenance || []), `opportunity:${feedbackOpportunityId}`])],
+      settlement: normalized,
+      notes: result.error,
+    });
+  } else {
+    logger.warn('CEX settlement is not terminal; deferring Cryptara feedback', {
+      component: 'ExecutionOrchestrator',
+      opportunityId: feedbackOpportunityId,
+      expectedProfitUsd: plan.netProfitUsd,
+      status: result.status,
+      settlementConfirmed,
+      realizedProfitUsd: realizedProfitUsd ?? null,
+      realizedFeeUsd: realizedFeeUsd ?? null,
+      realizedSlippageBps: realizedSlippageBps ?? null,
+      error: result.error,
+    });
+  }
+
+  return {
+    ...result,
+    settlementConfirmed,
+    latencyMs,
+    netExpectedProfitUsd: plan.netProfitUsd,
+  };
+}
+
+async function getCurrentBlock(): Promise<number> {
+  await multiProviderRpcManager.initialize(['ethereum']);
+  const { result } = await multiProviderRpcManager.execute(
+    'ethereum',
+    'blocks',
+    provider => provider.getBlockNumber(),
+  );
+  return result;
+}
+
+// Export types
+export type { Opportunity, ExecutionResult };
+
+// Re-export individual modules
+export { MultiRelaySubmitter } from './multi-relay-submitter.js';
+export { FlashLoanAggregator } from './flash-loan-aggregator.js';
+export { UltraLowLatencyExecutor } from './ultra-low-latency-executor.js';

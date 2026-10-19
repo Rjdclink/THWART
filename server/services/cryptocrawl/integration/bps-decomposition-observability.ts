@@ -1,0 +1,152 @@
+import logger from '../../../logger.js';
+import { measuredCandidateRegistry, type MeasuredOpportunityTopology } from '../discovery/measured-candidate-registry.js';
+import { getCexFourModeSnapshot } from './cex-four-mode-observability-wiring.js';
+import { getEconomicTransformationSnapshot } from './economic-transformation-wiring.js';
+import { ensureBpsPrivateRefundEvidenceWiring, getPrivateRefundEvidenceSnapshot, stopBpsPrivateRefundEvidenceWiring } from './bps-private-refund-evidence.js';
+
+export interface TopologyBpsSnapshot {
+  observed: number;
+  observedWithNetBps: number;
+  positive: number;
+  nearBreakEven: number;
+  bestNetProfitBps: number | null;
+  averageBpsToBreakEven: number | null;
+  averageAllInCostBps: number | null;
+}
+
+export interface BpsDecompositionSnapshot {
+  observedAt: number;
+  byTopology: Record<MeasuredOpportunityTopology, TopologyBpsSnapshot>;
+  cexFourMode: {
+    observedModes: number;
+    positiveModes: number;
+    observationOnlyModes: number;
+    bestNetAfterExchangeFeesBps: number | null;
+    closestBpsToBreakEven: number | null;
+    medianBpsToBreakEven: number | null;
+    p90BpsToBreakEven: number | null;
+    closestMode: { symbol: string; mode: string; buyVenue: string; sellVenue: string; recoveryEfficiency: number } | null;
+  };
+  rescuePortfolio: { candidates: number; dominantCostCouldCoverGap: number; closestBpsToBreakEven: number | null; };
+  privateRefundEvidence: {
+    receivedRefunds: number;
+    pendingRefunds: number;
+    receivedWei: string;
+    pendingWei: string;
+    deterministicAdmissionCredit: false;
+  };
+  authority: 'telemetry_only';
+  executionAuthority: false;
+}
+
+const TOPOLOGIES: MeasuredOpportunityTopology[] = ['CEX_CEX','DEX_ATOMIC','ZERO_CAPITAL_ATOMIC','CROSS_CHAIN','MEMPOOL_BACKRUN','LIQUIDATION','MAKER_CEX','FUNDING_ARBITRAGE','PREDICTION_EVENT'];
+let timer: NodeJS.Timeout | null = null;
+let latest: BpsDecompositionSnapshot | null = null;
+
+function finite(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value); }
+function average(values: number[]): number | null { return values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length; }
+function percentile(values: number[], fraction: number): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.max(0, Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * fraction)))];
+}
+
+function topologySnapshot(topology: MeasuredOpportunityTopology): TopologyBpsSnapshot {
+  const now = Date.now();
+  // Current BPS telemetry must never surface an expired opportunity as if it were
+  // still actionable. Use the largest canonical registry window, then scope to
+  // topology and freshness before calculating economics. Historical/windowed
+  // throughput remains available from the registry metrics separately.
+  const candidates = measuredCandidateRegistry.getRecent(4096).filter(candidate =>
+    candidate.topology === topology
+    && candidate.status !== 'expired'
+    && candidate.expiresAt > now,
+  );
+  const withBps = candidates.filter(candidate => finite(candidate.canonicalBps.netBps));
+  const bpsToBreakEven = withBps.map(candidate => candidate.canonicalBps.bpsToBreakEven).filter(finite);
+  const allIn = withBps.map(candidate => candidate.canonicalBps.allInCostBps).filter(finite);
+  return {
+    observed: candidates.length,
+    observedWithNetBps: withBps.length,
+    positive: withBps.filter(candidate => Number(candidate.canonicalBps.netBps) > 0).length,
+    nearBreakEven: withBps.filter(candidate => Number(candidate.canonicalBps.netBps) <= 0).length,
+    bestNetProfitBps: withBps.length > 0 ? Math.max(...withBps.map(candidate => Number(candidate.canonicalBps.netBps))) : null,
+    averageBpsToBreakEven: average(bpsToBreakEven),
+    averageAllInCostBps: average(allIn),
+  };
+}
+
+function refresh(): void {
+  const byTopology = Object.fromEntries(TOPOLOGIES.map(topology => [topology, topologySnapshot(topology)])) as Record<MeasuredOpportunityTopology, TopologyBpsSnapshot>;
+  const cexModes = getCexFourModeSnapshot();
+  const rescue = getEconomicTransformationSnapshot();
+  const privateRefunds = getPrivateRefundEvidenceSnapshot();
+  const cexNegative = cexModes.filter(item => !item.economicallyPositive).sort((a, b) => a.bpsToBreakEven - b.bpsToBreakEven);
+  const cexBreakEven = cexNegative.map(item => item.bpsToBreakEven).filter(finite);
+  const rescueBreakEven = rescue.map(item => item.bpsToBreakEven).filter(finite);
+  const closest = cexNegative[0] ?? null;
+
+  latest = {
+    observedAt: Date.now(), byTopology,
+    cexFourMode: {
+      observedModes: cexModes.length,
+      positiveModes: cexModes.filter(item => item.economicallyPositive).length,
+      observationOnlyModes: cexModes.filter(item => item.observationOnly).length,
+      bestNetAfterExchangeFeesBps: cexModes.length > 0 ? Math.max(...cexModes.map(item => item.netAfterExchangeFeesBps)) : null,
+      closestBpsToBreakEven: cexBreakEven.length > 0 ? Math.min(...cexBreakEven) : null,
+      medianBpsToBreakEven: percentile(cexBreakEven, 0.5),
+      p90BpsToBreakEven: percentile(cexBreakEven, 0.9),
+      closestMode: closest ? { symbol: closest.symbol, mode: closest.mode, buyVenue: closest.buyVenue, sellVenue: closest.sellVenue, recoveryEfficiency: closest.recoveryEfficiency } : null,
+    },
+    rescuePortfolio: {
+      candidates: rescue.length,
+      dominantCostCouldCoverGap: rescue.filter(item => item.dominantCostAloneCouldCoverGap).length,
+      closestBpsToBreakEven: rescueBreakEven.length > 0 ? Math.min(...rescueBreakEven) : null,
+    },
+    privateRefundEvidence: {
+      receivedRefunds: privateRefunds.receivedRefunds,
+      pendingRefunds: privateRefunds.pendingRefunds,
+      receivedWei: privateRefunds.receivedWei,
+      pendingWei: privateRefunds.pendingWei,
+      deterministicAdmissionCredit: false,
+    },
+    authority: 'telemetry_only', executionAuthority: false,
+  };
+
+  logger.info('[BpsDecomposition] Exact measured BPS telemetry refreshed', {
+    component: 'BpsDecompositionObservability', ...latest,
+    gapDistributionAuthority: 'measured_telemetry_only',
+    currentCandidateAuthority: 'unexpired_canonical_bps_only',
+    staleCandidateEconomicAuthority: false,
+    privateRefundEconomicAuthority: 'received_terminal_evidence_only',
+    pendingPrivateRefundEconomicAuthority: false,
+    syntheticProfitAllowed: false,
+    profitabilityClaimsRequireMeasuredEconomics: true,
+  });
+}
+
+export function getBpsDecompositionSnapshot(): BpsDecompositionSnapshot | null {
+  if (!latest) return null;
+  return {
+    ...latest,
+    byTopology: Object.fromEntries(Object.entries(latest.byTopology).map(([key, value]) => [key, { ...value }])) as Record<MeasuredOpportunityTopology, TopologyBpsSnapshot>,
+    cexFourMode: { ...latest.cexFourMode },
+    rescuePortfolio: { ...latest.rescuePortfolio },
+    privateRefundEvidence: { ...latest.privateRefundEvidence },
+  };
+}
+
+export function ensureBpsDecompositionObservability(): void {
+  if (timer || process.env.CRYPTOCRAWL_BPS_DECOMPOSITION_ENABLED === 'false') return;
+  ensureBpsPrivateRefundEvidenceWiring();
+  refresh();
+  if (process.env.NO_INTERVALS !== 'true') {
+    const intervalMs = Math.max(5_000, Math.min(120_000, Number(process.env.CRYPTOCRAWL_BPS_DECOMPOSITION_INTERVAL_MS || 15_000)));
+    timer = setInterval(refresh, intervalMs); timer.unref?.();
+  }
+}
+export function stopBpsDecompositionObservability(): void {
+  if (timer) clearInterval(timer);
+  timer = null;
+  stopBpsPrivateRefundEvidenceWiring();
+}

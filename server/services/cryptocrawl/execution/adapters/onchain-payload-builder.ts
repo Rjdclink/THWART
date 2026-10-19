@@ -1,0 +1,232 @@
+import { ethers } from 'ethers';
+import { buildProtocolAnchorCall, resolveProtocolAnchorPool } from './protocol-anchor-adapter.js';
+import { buildSkyPrimaryMarketCall, resolveSkyPrimaryMarketPool } from './primary-market-anchor-adapter.js';
+
+export type SupportedExecutionChain = 'ethereum' | 'polygon' | 'arbitrum' | 'optimism' | 'bsc' | 'avalanche' | 'europa';
+export type SupportedSwapProtocol = 'uniswapV3' | 'sushiswap' | 'sushiswapV3' | 'pancakeswapV2' | 'traderJoeV1' | 'aaveGhoGsm' | 'fluidDexT1' | 'skyLitePsm' | 'skyDaiUsds';
+export type UniswapV3FeeTier = 100 | 500 | 3000 | 10000;
+
+export interface OnchainSwapLeg {
+  protocol: SupportedSwapProtocol;
+  chain: SupportedExecutionChain;
+  tokenIn: string;
+  tokenOut: string;
+  amountIn: string;
+  minAmountOut: string;
+  pool?: string;
+  feeTier?: UniswapV3FeeTier;
+  recipient?: string;
+  deadlineBufferSeconds?: number;
+}
+
+export interface OnchainExecutionPlan {
+  chain: SupportedExecutionChain;
+  recipient: string;
+  value?: string;
+  gasLimit?: number;
+  legs: OnchainSwapLeg[];
+}
+
+export interface BuiltOnchainPayload {
+  to: string;
+  data: string;
+  value: string;
+  gasLimit: number;
+}
+
+export interface BuiltSwapCall {
+  target: string;
+  data: string;
+  value: string;
+  gasLimit: number;
+  approvalToken: string;
+  approvalAmount: string;
+}
+
+const UNISWAP_V3_ROUTER_ABI = [
+  'function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountOut)',
+];
+
+const V2_ROUTER_ABI = [
+  'function swapExactTokensForTokens(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline) external returns (uint256[] amounts)',
+];
+
+const DEX_ROUTERS: Record<SupportedSwapProtocol, Partial<Record<SupportedExecutionChain, string>>> = {
+  uniswapV3: {
+    ethereum: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+    polygon: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+    arbitrum: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+    optimism: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+  },
+  sushiswap: {
+    ethereum: '0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F',
+    polygon: '0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506',
+    arbitrum: '0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506',
+    bsc: '0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506',
+    avalanche: '0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506',
+  },
+  pancakeswapV2: {
+    bsc: '0x10ED43C718714eb63d5aA57B78B54704E256024E',
+  },
+  traderJoeV1: {
+    avalanche: '0x60aE616a2155Ee3d9A68541Ba4544862310933d4',
+  },
+  sushiswapV3: {},
+  aaveGhoGsm: {},
+  fluidDexT1: {},
+  skyLitePsm: {},
+  skyDaiUsds: {},
+};
+
+function isAddress(value: string): boolean {
+  return /^0x[a-fA-F0-9]{40}$/.test(value);
+}
+
+function parseAmount(label: string, raw: string): ethers.BigNumber {
+  if (!/^\d+$/.test(raw)) {
+    throw new Error(`${label} must be an integer string denominated in base units`);
+  }
+
+  return ethers.BigNumber.from(raw);
+}
+
+function isProtocolAnchor(protocol: SupportedSwapProtocol): boolean {
+  return protocol === 'aaveGhoGsm'
+    || protocol === 'fluidDexT1'
+    || protocol === 'skyLitePsm'
+    || protocol === 'skyDaiUsds';
+}
+
+function resolveRouter(protocol: SupportedSwapProtocol, chain: SupportedExecutionChain): string {
+  if (isProtocolAnchor(protocol)) {
+    throw new Error(`${protocol} uses its reviewed protocol-anchor target rather than a generic DEX router`);
+  }
+  if (chain === 'europa') {
+    const envKey = protocol === 'uniswapV3' ? 'EUROPA_UNISWAP_V3_ROUTER' : 'EUROPA_SUSHISWAP_ROUTER';
+    const configured = process.env[envKey]?.trim();
+    if (!configured || !isAddress(configured)) {
+      throw new Error(`${envKey} must be configured with a verified Europa router address`);
+    }
+    return configured;
+  }
+  const router = DEX_ROUTERS[protocol][chain];
+  if (!router || !isAddress(router)) {
+    throw new Error(`No ${protocol} router configured for ${chain}`);
+  }
+  return router;
+}
+
+function defaultGasLimit(protocol: SupportedSwapProtocol): number {
+  if (protocol === 'aaveGhoGsm') return 300000;
+  if (protocol === 'fluidDexT1') return 450000;
+  if (protocol === 'skyLitePsm') return 275000;
+  if (protocol === 'skyDaiUsds') return 325000;
+  return protocol === 'uniswapV3' ? 250000 : 300000;
+}
+
+export function buildSwapCallFromLeg(
+  chain: SupportedExecutionChain,
+  defaultRecipient: string,
+  leg: OnchainSwapLeg,
+): BuiltSwapCall {
+  if (leg.chain !== chain) {
+    throw new Error(`Leg chain ${leg.chain} does not match plan chain ${chain}`);
+  }
+
+  if (!isAddress(leg.tokenIn) || !isAddress(leg.tokenOut)) {
+    throw new Error('tokenIn and tokenOut must be valid EVM token addresses');
+  }
+
+  const recipient = leg.recipient || defaultRecipient;
+  if (!isAddress(recipient)) {
+    throw new Error('Swap recipient must be a valid EVM address');
+  }
+
+  const amountIn = parseAmount('amountIn', leg.amountIn);
+  const minAmountOut = parseAmount('minAmountOut', leg.minAmountOut);
+
+  if (leg.protocol === 'skyLitePsm' || leg.protocol === 'skyDaiUsds') {
+    if (chain !== 'ethereum') throw new Error(`${leg.protocol} primary-market execution is currently reviewed only for Ethereum`);
+    const pool = resolveSkyPrimaryMarketPool(leg.protocol, leg.tokenIn, leg.tokenOut, leg.pool);
+    return buildSkyPrimaryMarketCall({
+      leg: { protocol: leg.protocol, tokenIn: leg.tokenIn, tokenOut: leg.tokenOut, pool },
+      amountIn: amountIn.toString(),
+      minAmountOut: minAmountOut.toString(),
+      recipient,
+    });
+  }
+
+  if (leg.protocol === 'aaveGhoGsm' || leg.protocol === 'fluidDexT1') {
+    if (chain !== 'ethereum') throw new Error(`${leg.protocol} anchor execution is currently reviewed only for Ethereum`);
+    const pool = resolveProtocolAnchorPool(leg.protocol, leg.tokenIn, leg.tokenOut, leg.pool);
+    return buildProtocolAnchorCall({
+      leg: { protocol: leg.protocol, tokenIn: leg.tokenIn, tokenOut: leg.tokenOut, pool },
+      amountIn: amountIn.toString(),
+      minAmountOut: minAmountOut.toString(),
+      recipient,
+    });
+  }
+
+  const router = resolveRouter(leg.protocol, chain);
+  const deadline = Math.floor(Date.now() / 1000) + Math.max(30, leg.deadlineBufferSeconds || 120);
+
+  if (leg.protocol === 'uniswapV3') {
+    const iface = new ethers.utils.Interface(UNISWAP_V3_ROUTER_ABI);
+    return {
+      target: router,
+      data: iface.encodeFunctionData('exactInputSingle', [{
+        tokenIn: leg.tokenIn,
+        tokenOut: leg.tokenOut,
+        fee: leg.feeTier || 3000,
+        recipient,
+        deadline,
+        amountIn,
+        amountOutMinimum: minAmountOut,
+        sqrtPriceLimitX96: 0,
+      }]),
+      value: '0',
+      gasLimit: defaultGasLimit(leg.protocol),
+      approvalToken: leg.tokenIn,
+      approvalAmount: amountIn.toString(),
+    };
+  }
+
+  if (leg.protocol === 'sushiswapV3') {
+    throw new Error('Sushi V3 Europa routes must use the verified Route Processor payload builder');
+  }
+
+  const iface = new ethers.utils.Interface(V2_ROUTER_ABI);
+  return {
+    target: router,
+    data: iface.encodeFunctionData('swapExactTokensForTokens', [
+      amountIn,
+      minAmountOut,
+      [leg.tokenIn, leg.tokenOut],
+      recipient,
+      deadline,
+    ]),
+    value: '0',
+    gasLimit: defaultGasLimit(leg.protocol),
+    approvalToken: leg.tokenIn,
+    approvalAmount: amountIn.toString(),
+  };
+}
+
+export function buildOnchainPayloadFromPlan(plan: OnchainExecutionPlan): BuiltOnchainPayload {
+  if (!isAddress(plan.recipient)) {
+    throw new Error('On-chain execution plan recipient must be a valid EVM address');
+  }
+
+  if (!Array.isArray(plan.legs) || plan.legs.length !== 1) {
+    throw new Error('Structured on-chain payload builder currently supports exactly one swap leg per payload');
+  }
+
+  const [leg] = plan.legs;
+  const swapCall = buildSwapCallFromLeg(plan.chain, plan.recipient, leg);
+  return {
+    to: swapCall.target,
+    data: swapCall.data,
+    value: plan.value || swapCall.value,
+    gasLimit: plan.gasLimit || swapCall.gasLimit,
+  };
+}

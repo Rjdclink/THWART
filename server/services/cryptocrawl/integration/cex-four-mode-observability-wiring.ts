@@ -1,0 +1,384 @@
+import logger from '../../../logger.js';
+import { getLastOrderedMarketUniverseSymbols } from '../discovery/market-universe-controller.js';
+import { getActiveExecutableQuoteVenues } from '../discovery/venue-capability-registry.js';
+import {
+  primeCexFeeEvidenceForVenueSymbols,
+  type CexFeePrimeResult,
+  type CexFeeVenue,
+} from '../intelligence/cex-fee-resolver.js';
+import { evaluateCexFourModeMatrix, type CexModeEconomics } from '../intelligence/cex-four-mode-matrix.js';
+import { buildAdaptiveProfitabilitySearchPolicy, type AdaptiveProfitabilitySearchPolicy } from '../optimization/adaptive-profitability-search-policy.js';
+
+let timer: NodeJS.Timeout | null = null;
+let active = false;
+let running = false;
+let latest: CexModeEconomics[] = [];
+let nextIntervalMs = 15_000;
+let lastCanonicalPromotionAt = 0;
+let lastCanonicalPromotionSignature = '';
+
+function baseSymbolLimit(): number {
+  const parsed = Number(process.env.CRYPTOCRAWL_CEX_MODE_MATRIX_SYMBOLS || 24);
+  return Number.isFinite(parsed) ? Math.max(4, Math.min(64, Math.trunc(parsed))) : 24;
+}
+
+function baseIntervalMs(): number {
+  const parsed = Number(process.env.CRYPTOCRAWL_CEX_MODE_MATRIX_INTERVAL_MS || 15_000);
+  return Number.isFinite(parsed) ? Math.max(5_000, Math.min(60_000, Math.trunc(parsed))) : 15_000;
+}
+
+function feePrewarmSymbolLimit(): number {
+  const parsed = Number(process.env.CRYPTOCRAWL_CEX_FEE_PREWARM_SYMBOLS || 12);
+  return Number.isFinite(parsed) ? Math.max(3, Math.min(24, Math.trunc(parsed))) : 12;
+}
+
+function feePrewarmMaxAgeMs(policy: AdaptiveProfitabilitySearchPolicy): number {
+  // Five seconds is intentionally the current floor: it is inside the requested
+  // 2-5 second freshness target while keeping Kraken's account-wide private API
+  // lane comfortably below its steady-state rate budget. The resolver remains
+  // single-flight/batched and is still the sole authenticated fee authority.
+  return Math.max(1_000, Math.min(5_000, policy.feeRefreshMaxAgeMs));
+}
+
+function orderedFeePrewarmSymbols(policy: AdaptiveProfitabilitySearchPolicy): string[] {
+  return [...new Set([
+    ...policy.recoverySymbols,
+    ...policy.hybridRecoverySymbols,
+    ...policy.staleEvidenceSymbols,
+    ...policy.orderedSymbols,
+  ])].slice(0, feePrewarmSymbolLimit());
+}
+
+async function prewarmAdaptiveFeeEvidence(
+  policy: AdaptiveProfitabilitySearchPolicy,
+  venues: readonly CexFeeVenue[],
+): Promise<CexFeePrimeResult | null> {
+  const symbols = orderedFeePrewarmSymbols(policy);
+  if (symbols.length === 0 || venues.length === 0) return null;
+  const requested: Partial<Record<CexFeeVenue, readonly string[]>> = {};
+  for (const venue of venues) requested[venue] = symbols;
+  try {
+    return await primeCexFeeEvidenceForVenueSymbols(requested, feePrewarmMaxAgeMs(policy));
+  } catch (error) {
+    logger.warn('[CexFourMode] Adaptive fee prewarm degraded; matrix remains fail-closed on authenticated fee evidence', {
+      component: 'CexFourModeObservabilityWiring',
+      symbols: symbols.length,
+      venues,
+      error: error instanceof Error ? error.message : String(error),
+      executionAuthority: false,
+    });
+    return null;
+  }
+}
+
+function threeVenueCoverage(
+  modes: readonly CexModeEconomics[],
+  symbols: readonly string[],
+  expectedVenues: readonly CexFeeVenue[],
+) {
+  const expectedPairs = new Set<string>();
+  for (let index = 0; index < expectedVenues.length; index += 1) {
+    for (let other = index + 1; other < expectedVenues.length; other += 1) {
+      expectedPairs.add([expectedVenues[index], expectedVenues[other]].sort().join('<->'));
+    }
+  }
+
+  const bySymbol = symbols.map(symbol => {
+    const symbolModes = modes.filter(item => item.symbol === symbol);
+    const observedVenues = [...new Set(symbolModes.flatMap(item => [item.buyVenue, item.sellVenue]))].sort() as CexFeeVenue[];
+    const observedPairs = new Set(symbolModes.map(item => [item.buyVenue, item.sellVenue].sort().join('<->')));
+    const missingVenues = expectedVenues.filter(venue => !observedVenues.includes(venue));
+    const missingPairs = [...expectedPairs].filter(pair => !observedPairs.has(pair));
+    return {
+      symbol,
+      expectedVenueCount: expectedVenues.length,
+      observedVenues,
+      missingVenues,
+      expectedPairFamilies: expectedPairs.size,
+      observedPairFamilies: observedPairs.size,
+      missingPairFamilies: missingPairs,
+      completeThreeVenueParticipation: expectedVenues.length === 3 && missingVenues.length === 0,
+      completePairFamilyCoverage: missingPairs.length === 0,
+    };
+  });
+
+  return {
+    expectedVenues: [...expectedVenues],
+    expectedOrderedPairEvaluationsPerSymbol: expectedVenues.length * Math.max(0, expectedVenues.length - 1),
+    expectedPairFamiliesPerSymbol: expectedPairs.size,
+    completeThreeVenueSymbols: bySymbol.filter(row => row.completeThreeVenueParticipation).length,
+    completePairFamilySymbols: bySymbol.filter(row => row.completePairFamilyCoverage).length,
+    incompleteSymbols: bySymbol.filter(row => !row.completeThreeVenueParticipation || !row.completePairFamilyCoverage).slice(0, 12),
+    matrixLoopAuthority: 'all_ordered_buy_sell_pairs_across_active_executable_venues' as const,
+    executionAuthority: false as const,
+  };
+}
+
+function snapshotMaxAgeMs(): number {
+  const configured = Number(process.env.CRYPTOCRAWL_CEX_MODE_SNAPSHOT_MAX_AGE_MS);
+  if (Number.isFinite(configured) && configured > 0) {
+    return Math.max(5_000, Math.min(120_000, Math.trunc(configured)));
+  }
+  const quoteMaxAgeMs = Math.max(250, Math.min(15_000, Number(process.env.CRYPTO_ARBITRAGE_MAX_QUOTE_AGE_MS || 5_000)));
+  const scanCadenceMs = Math.max(baseIntervalMs(), nextIntervalMs);
+  return Math.max(5_000, Math.min(60_000, scanCadenceMs + quoteMaxAgeMs * 2));
+}
+
+function freshModes(now = Date.now()): CexModeEconomics[] {
+  const maxAgeMs = snapshotMaxAgeMs();
+  return latest.filter(item =>
+    Number.isFinite(item.observedAt)
+    && item.observedAt > 0
+    && Math.max(0, now - item.observedAt) <= maxAgeMs,
+  );
+}
+
+function canonicalPromotionCooldownMs(): number {
+  const parsed = Number(process.env.CRYPTOCRAWL_CEX_POSITIVE_PROMOTION_COOLDOWN_MS || 2_000);
+  return Number.isFinite(parsed) ? Math.max(500, Math.min(30_000, Math.trunc(parsed))) : 2_000;
+}
+
+function compare(left: CexModeEconomics, right: CexModeEconomics): number {
+  const positiveDelta = Number(right.economicallyPositive) - Number(left.economicallyPositive);
+  if (positiveDelta !== 0) return positiveDelta;
+  if (left.economicallyPositive && right.economicallyPositive) {
+    return right.expectedFeeAdjustedBps - left.expectedFeeAdjustedBps
+      || right.netAfterExchangeFeesBps - left.netAfterExchangeFeesBps;
+  }
+  const leftRiskGap = Number((left as any).riskAdjustedBpsToBreakEven ?? left.bpsToBreakEven);
+  const rightRiskGap = Number((right as any).riskAdjustedBpsToBreakEven ?? right.bpsToBreakEven);
+  return leftRiskGap - rightRiskGap
+    || left.bpsToBreakEven - right.bpsToBreakEven
+    || right.recoveryEfficiency - left.recoveryEfficiency;
+}
+
+export function getClosestCexNearMissesBySymbol(limit = 16): CexModeEconomics[] {
+  const best = new Map<string, CexModeEconomics>();
+  for (const item of freshModes()) {
+    if (item.economicallyPositive) continue;
+    const current = best.get(item.symbol);
+    if (!current || compare(item, current) < 0) best.set(item.symbol, item);
+  }
+  return [...best.values()].sort(compare).slice(0, Math.max(1, Math.min(64, limit)));
+}
+
+function triggerCanonicalPositiveRevalidation(positive: readonly CexModeEconomics[]): void {
+  if (positive.length === 0 || process.env.CRYPTOCRAWL_CEX_POSITIVE_PROMOTION_ENABLED === 'false') return;
+  const now = Date.now();
+  const symbols = [...new Set(positive.map(item => item.symbol))].sort();
+  const signature = symbols.join(',');
+  if (signature === lastCanonicalPromotionSignature && now - lastCanonicalPromotionAt < canonicalPromotionCooldownMs()) return;
+  lastCanonicalPromotionSignature = signature;
+  lastCanonicalPromotionAt = now;
+
+  // Four-mode economics remain advisory. Positive TT/MT/TM/MM observations are
+  // scheduling triggers only; the canonical graph independently re-fetches
+  // executable books, authenticated fees, product constraints, depth-aware size,
+  // and all-in economics. MT/TM can now become canonical only through the
+  // maker-first/fresh-taker-requote execution wiring installed in the runtime.
+  void import('../discovery/opportunity-graph.js')
+    .then(({ measuredOpportunityGraph }) => measuredOpportunityGraph.revalidateSymbols(symbols))
+    .then(cycle => {
+      logger.info('[CexFourMode] Positive observation triggered canonical economic revalidation', {
+        component: 'CexFourModeObservabilityWiring',
+        observedPositiveSymbols: symbols,
+        canonicalDeterministicPositive: cycle.deterministicPositive,
+        canonicalEligibleCandidates: cycle.eligibleCandidates,
+        canonicalCycleId: cycle.cycleId,
+        canonicalCycleTrigger: cycle.cycleTrigger,
+        targetedRevalidation: true,
+        coalescedIntoOlderFullScan: false,
+        authority: 'scheduling_trigger_only',
+        observationExecutionAuthority: false,
+        canonicalHybridExecutionPathAvailable: true,
+      });
+    })
+    .catch(error => {
+      logger.warn('[CexFourMode] Canonical positive revalidation trigger degraded; advisory observation remains non-executable', {
+        component: 'CexFourModeObservabilityWiring',
+        observedPositiveSymbols: symbols,
+        error: error instanceof Error ? error.message : String(error),
+        executionAuthority: false,
+      });
+    });
+}
+
+async function observe(): Promise<void> {
+  if (running) return;
+  running = true;
+  try {
+    const universe = getLastOrderedMarketUniverseSymbols();
+    const freshPriorModes = freshModes();
+    if (freshPriorModes.length !== latest.length) {
+      const staleModesDropped = latest.length - freshPriorModes.length;
+      latest = freshPriorModes;
+      logger.info('[CexFourMode] Expired advisory opportunity evidence evicted before adaptive scan', {
+        component: 'CexFourModeObservabilityWiring',
+        staleModesDropped,
+        snapshotMaxAgeMs: snapshotMaxAgeMs(),
+        staleOpportunityReadable: false,
+        staleOpportunitySearchFeedbackAllowed: false,
+        executionAuthority: false,
+      });
+    }
+    const selectionPolicy = buildAdaptiveProfitabilitySearchPolicy({
+      universeSymbols: universe,
+      latestModes: freshPriorModes,
+      baseSymbolLimit: baseSymbolLimit(),
+      baseIntervalMs: baseIntervalMs(),
+    });
+    const symbols = selectionPolicy.orderedSymbols;
+    const activeVenues = getActiveExecutableQuoteVenues() as CexFeeVenue[];
+    const feePrewarm = await prewarmAdaptiveFeeEvidence(selectionPolicy, activeVenues);
+    const settled = await Promise.allSettled(symbols.map(symbol => evaluateCexFourModeMatrix({
+      symbol,
+      maxFeeAgeMs: Math.min(selectionPolicy.feeRefreshMaxAgeMs, 5_000),
+    })));
+    const evaluatedModes = settled.flatMap(result => result.status === 'fulfilled' ? result.value : []);
+    latest = [...evaluatedModes].sort(compare).slice(0, 256);
+
+    const nextPolicy = buildAdaptiveProfitabilitySearchPolicy({
+      universeSymbols: universe,
+      latestModes: latest,
+      baseSymbolLimit: baseSymbolLimit(),
+      baseIntervalMs: baseIntervalMs(),
+    });
+    nextIntervalMs = nextPolicy.scanIntervalMs;
+
+    const positive = latest.filter(item => item.economicallyPositive);
+    const nearMiss = latest.filter(item => !item.economicallyPositive);
+    const closestBySymbol = getClosestCexNearMissesBySymbol(12);
+    const venueCoverage = threeVenueCoverage(evaluatedModes, symbols, activeVenues);
+    logger.info('[CexFourMode] TT/MT/TM/MM measured economic matrix refreshed', {
+      component: 'CexFourModeObservabilityWiring',
+      symbols: symbols.length,
+      observedModes: latest.length,
+      positiveModes: positive.length,
+      nearBreakEvenObservationModes: nearMiss.length,
+      closestNearMiss: nearMiss[0] ?? null,
+      closestNearMissesBySymbol: closestBySymbol.map(item => ({
+        symbol: item.symbol,
+        mode: item.mode,
+        buyVenue: item.buyVenue,
+        sellVenue: item.sellVenue,
+        combinedFeeBps: item.combinedFeeBps,
+        grossSpreadBps: item.grossSpreadBps,
+        netAfterExchangeFeesBps: item.netAfterExchangeFeesBps,
+        bpsToBreakEven: item.bpsToBreakEven,
+        recoveryEfficiency: item.recoveryEfficiency,
+      })),
+      adaptiveSearch: {
+        selectionSymbolLimit: selectionPolicy.symbolLimit,
+        nextSymbolLimit: nextPolicy.symbolLimit,
+        nextIntervalMs: nextPolicy.scanIntervalMs,
+        closestGapBps: nextPolicy.closestGapBps,
+        closestRiskGapBps: nextPolicy.closestRiskGapBps,
+        recoverySymbols: nextPolicy.recoverySymbols,
+        explorationSymbols: nextPolicy.explorationSymbols,
+        hybridRecoverySymbols: nextPolicy.hybridRecoverySymbols,
+        staleEvidenceSymbols: nextPolicy.staleEvidenceSymbols,
+        feeRefreshMaxAgeMs: Math.min(nextPolicy.feeRefreshMaxAgeMs, 5_000),
+        activeBpsSolutionCount: nextPolicy.activeBpsSolutionCount,
+        activeBpsSolutionIds: nextPolicy.activeBpsSolutionIds,
+        makerFocusMultiplier: nextPolicy.makerFocusMultiplier,
+        sizeRefinementMultiplier: nextPolicy.sizeRefinementMultiplier,
+        mcSearchMultiplier: nextPolicy.mcSearchMultiplier,
+        authority: nextPolicy.authority,
+        executionAuthority: nextPolicy.executionAuthority,
+      },
+      feeFreshnessPrewarm: feePrewarm ? {
+        symbolLimit: feePrewarmSymbolLimit(),
+        targetMaxAgeMs: feePrewarmMaxAgeMs(selectionPolicy),
+        requestedSymbols: feePrewarm.requestedSymbols,
+        requestedByVenue: feePrewarm.requestedByVenue,
+        resolvedByVenue: {
+          coinbase: feePrewarm.coinbaseResolved,
+          kraken: feePrewarm.krakenResolved,
+          okx: feePrewarm.okxResolved,
+        },
+        unresolved: feePrewarm.unresolved.slice(0, 12),
+        adaptiveHotSymbolsFirst: true,
+        hardcodedSymbolAllowlist: false,
+        executionAuthority: false,
+      } : null,
+      threeVenueCoverage: venueCoverage,
+      bestPositive: positive[0] ? {
+        symbol: positive[0].symbol,
+        mode: positive[0].mode,
+        buyVenue: positive[0].buyVenue,
+        sellVenue: positive[0].sellVenue,
+        netAfterExchangeFeesBps: positive[0].netAfterExchangeFeesBps,
+        expectedFeeAdjustedBps: positive[0].expectedFeeAdjustedBps,
+        observationExecutionAuthority: positive[0].executionAuthority,
+        canonicalRevalidationRequired: true,
+      } : null,
+      canonicalPositivePromotion: {
+        enabled: process.env.CRYPTOCRAWL_CEX_POSITIVE_PROMOTION_ENABLED !== 'false',
+        cooldownMs: canonicalPromotionCooldownMs(),
+        authority: 'scheduling_trigger_only',
+      },
+      freshness: {
+        snapshotMaxAgeMs: snapshotMaxAgeMs(),
+        staleOpportunityReadable: false,
+        staleOpportunitySearchFeedbackAllowed: false,
+        scanReschedulesAfterFailure: true,
+      },
+      negativeRankingObjective: 'smallest_risk_adjusted_then_exact_bps_to_break_even_first',
+      observationFloorBps: Number(process.env.CRYPTOCRAWL_CEX_FOUR_MODE_OBSERVATION_FLOOR_BPS ?? -200),
+      selectedFeeFreshnessTargetMs: Math.min(selectionPolicy.feeRefreshMaxAgeMs, 5_000),
+      hybridObservationExecutionAuthority: false,
+      hybridCanonicalExecutionAuthority: true,
+      hybridCanonicalExecutionPath: 'MT_TM_maker_terminal_fill_then_fresh_depth_aware_taker_hedge',
+      negativeObservationExecutionAuthority: false,
+      existingTtMmExecutorsChanged: false,
+    });
+    triggerCanonicalPositiveRevalidation(positive);
+  } finally {
+    running = false;
+  }
+}
+
+async function observeFailClosed(): Promise<void> {
+  try {
+    await observe();
+  } catch (error) {
+    const staleModesCleared = latest.length;
+    latest = [];
+    logger.warn('[CexFourMode] Advisory scan failed closed; prior opportunity snapshot cleared and next scan retained', {
+      component: 'CexFourModeObservabilityWiring',
+      staleModesCleared,
+      error: error instanceof Error ? error.message : String(error),
+      staleOpportunityReadable: false,
+      continuousScanSchedulingPreserved: true,
+      executionAuthority: false,
+    });
+  }
+}
+
+export function getCexFourModeSnapshot(): CexModeEconomics[] {
+  const fresh = freshModes();
+  if (fresh.length !== latest.length) latest = fresh;
+  return fresh.map(item => ({ ...item, missingExecutionInformation: [...item.missingExecutionInformation] }));
+}
+
+function scheduleNext(): void {
+  if (!active || process.env.NO_INTERVALS === 'true') return;
+  timer = setTimeout(() => {
+    timer = null;
+    void observeFailClosed().finally(scheduleNext);
+  }, nextIntervalMs);
+  timer.unref?.();
+}
+
+export function ensureCexFourModeObservabilityWiring(): void {
+  if (active || process.env.CRYPTOCRAWL_CEX_MODE_MATRIX_ENABLED === 'false') return;
+  active = true;
+  nextIntervalMs = baseIntervalMs();
+  void observeFailClosed().finally(scheduleNext);
+}
+
+export function stopCexFourModeObservabilityWiring(): void {
+  active = false;
+  if (timer) clearTimeout(timer);
+  timer = null;
+}

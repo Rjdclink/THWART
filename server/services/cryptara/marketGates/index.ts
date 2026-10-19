@@ -1,0 +1,81 @@
+import { arbitrageVerifier } from '../../cryptocrawl/arbitrage/arbitrage-verifier.js';
+import { opportunityMlRanker } from '../opportunity-ml-ranker.js';
+import { CryptaraMarketGateEngine as BaseCryptaraMarketGateEngine } from './engine.js';
+import type { CryptaraMarketGateConfig, CryptaraMarketGateContext, GateEvaluation } from './types.js';
+
+let lastGateEngine: CryptaraMarketGateEngine | null = null;
+let lastGateContext: CryptaraMarketGateContext | null = null;
+let lastGateConfig: CryptaraMarketGateConfig | null = null;
+
+export class CryptaraMarketGateEngine extends BaseCryptaraMarketGateEngine {
+  evaluate(context: CryptaraMarketGateContext, config: CryptaraMarketGateConfig = {}): GateEvaluation {
+    lastGateEngine = this;
+    lastGateContext = { ...context };
+    lastGateConfig = { ...config, criticalSignals: config.criticalSignals ? [...config.criticalSignals] : undefined };
+
+    // Pair-specific gates must only consume fee evidence for that pair. Generic
+    // market-cycle gates have no pairOrSymbol, so use the freshest measured
+    // cross-venue context across the actively verified universe instead of
+    // leaving feesRebates/crossVenueFees permanently unknown.
+    const measuredFeeContext = context.pairOrSymbol
+      ? arbitrageVerifier.getBestCrossVenueFeeContext([context.pairOrSymbol])
+      : arbitrageVerifier.getBestCrossVenueFeeContext();
+
+    const enrichedContext: CryptaraMarketGateContext = {
+      ...context,
+      timeOfDay: context.timeOfDay ?? { utcHour: new Date().getUTCHours() },
+      feesRebates: context.feesRebates ?? (measuredFeeContext ? {
+        takerFeeBps: measuredFeeContext.buyTakerFeeBps + measuredFeeContext.sellTakerFeeBps,
+      } : undefined),
+      crossVenueFees: context.crossVenueFees ?? (measuredFeeContext ? {
+        buyVenue: measuredFeeContext.buyVenue,
+        sellVenue: measuredFeeContext.sellVenue,
+        buyTakerFeeBps: measuredFeeContext.buyTakerFeeBps,
+        sellTakerFeeBps: measuredFeeContext.sellTakerFeeBps,
+        grossSpreadBps: measuredFeeContext.grossSpreadBps,
+      } : undefined),
+    };
+
+    const evaluation = super.evaluate(enrichedContext, config);
+    const mlAssessment = opportunityMlRanker.assess(enrichedContext);
+
+    // AI/ML is advisory evidence only. It may rank and learn from opportunities, but it
+    // never overrides the deterministic market-gate decision or converts unknown/failed
+    // critical evidence into authorization.
+    return {
+      ...evaluation,
+      signals: [...evaluation.signals, mlAssessment.signal],
+    };
+  }
+}
+
+export function reevaluateLastMarketGate(): GateEvaluation | null {
+  if (!lastGateEngine || !lastGateContext) return null;
+  return lastGateEngine.evaluate(lastGateContext, lastGateConfig || {});
+}
+
+export type {
+  GateEvaluation,
+  GateSignal,
+  GateDecision,
+  GateActions,
+  SignalStatus,
+  CryptaraMarketGateContext,
+  CryptaraMarketGateConfig,
+  OrderFlowContext,
+  OrderFlowTrade,
+  MarketProfileContext,
+  LiquidityHeatmapContext,
+  VolatilityRegimeContext,
+  FundingRatesContext,
+  CorrelationContext,
+  TimeOfDayContext,
+  OptionsImpliedContext,
+  VenueLatencyContext,
+  FeeRebateContext,
+  CrossVenueFeeAsymmetryContext,
+  FundingCaptureNoInventoryContext,
+  DrawdownCapsContext,
+  ProfitReinvestmentLadderContext,
+  SlippageContext,
+} from './types.js';

@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+import express from 'express';
+import cookieParser from 'cookie-parser';
+import { randomBytes } from 'node:crypto';
+process.env.NODE_ENV = 'test';
+process.env.SESSION_SECRET = randomBytes(32).toString('hex');
+process.env.MASTER_ADMIN_PASSWORD = randomBytes(32).toString('hex');
+delete process.env.INTERNAL_KEY;
+delete process.env.INTERNAL_API_KEY;
+const { operatorAuth, requireOperator } = await import('../server/operatorAuth');
+const app = express(); app.use(express.json()); app.use(cookieParser());
+app.use('/api', operatorAuth);
+app.get('/admin/check', requireOperator, (req, res) => res.json({ master: (req as any).user?.isMasterBypass }));
+const server = app.listen(0, '127.0.0.1');
+await new Promise<void>(resolve => server.once('listening', resolve));
+const base = `http://127.0.0.1:${(server.address() as any).port}`;
+try {
+  assert.equal((await fetch(base + '/admin/check')).status, 401);
+  assert.equal((await fetch(base + '/api/master-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'incorrect' }) })).status, 401);
+  const login = await fetch(base + '/api/master-login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: process.env.MASTER_ADMIN_PASSWORD }) });
+  assert.equal(login.status, 200);
+  const cookie = login.headers.get('set-cookie')!.split(';')[0];
+  assert(cookie.startsWith('thwart_master='));
+  const authorized = await fetch(base + '/admin/check', { headers: { cookie } });
+  assert.equal(authorized.status, 200); assert.equal((await authorized.json()).master, true);
+  assert.equal((await fetch(base + '/admin/check', { headers: { cookie: cookie + 'tampered' } })).status, 401);
+  process.env.INTERNAL_KEY = randomBytes(32).toString('hex');
+  assert.equal((await fetch(base + '/admin/check', { headers: { 'X-Internal-Key': process.env.INTERNAL_KEY } })).status, 200);
+  console.log('PASS independent operator authentication, session identity, tamper rejection, and service key');
+  server.close(); process.exit(0);
+} catch (error) { console.error(error); server.close(); process.exit(1); }

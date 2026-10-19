@@ -1,0 +1,395 @@
+import { getActiveExecutableQuoteVenues } from './venue-capability-registry.js';
+import { getLastOrderedMarketUniverseSymbols } from './market-universe-controller.js';
+import { measuredCandidateRegistry, type MeasuredCandidate } from './measured-candidate-registry.js';
+import {
+  primeCexFeeEvidenceForVenueSymbols,
+  resolveCexFeeEvidence,
+  getCachedCexFeeEvidence,
+  type CexFeeEvidence,
+  type CexFeeVenue,
+} from '../intelligence/cex-fee-resolver.js';
+import { cexOrderBookStreams, type StreamOrderBookQuote } from '../intelligence/cex-order-book-stream.js';
+import { getCoinbaseAdvancedProductConstraints } from '../intelligence/coinbase-advanced-market-data.js';
+import { observeMakerPaperProof } from '../intelligence/maker-microstructure-proof.js';
+import { getProfitLadderNotionalAuthority } from '../governance/profit-ladder-notional-authority.js';
+import { getSpotProductConstraints } from '../execution/cex-spot-product-policy.js';
+import { evaluateMakerRecoveryCandidate } from '../execution/stablecoin-maker-strategy.js';
+
+const USD_NORMALIZED_QUOTES = new Set(['USD', 'USDC', 'USDT']);
+// Historical names are retained for the older structural verifier, but their
+// route-dropping semantics are retired. The selector returns every viable symbol.
+let makerFeePrimeCursor = 0;
+
+type MeasuredMakerBook = {
+  venue: CexFeeVenue;
+  quote: StreamOrderBookQuote | null;
+  usdNormalized: boolean;
+};
+
+type ViableMakerSymbol = {
+  symbol: string;
+  usableBooks: MeasuredMakerBook[];
+};
+
+type ConditionalMakerEconomics = {
+  notionalUsd: number;
+  grossProfitUsd: number;
+  feeUsd: number;
+  grossProfitBps: number;
+  netProfitBps: number;
+  bpsToBreakEven: number;
+};
+
+function effectiveMakerFeeBps(fee: CexFeeEvidence | null | undefined): number | null {
+  if (!fee || fee.source === 'configured_override') return null;
+  if (fee.makerFeeBps !== null && Number.isFinite(fee.makerFeeBps)) return Math.max(0, fee.makerFeeBps);
+  if (fee.makerRebateBps !== null && Number.isFinite(fee.makerRebateBps)) return -Math.max(0, fee.makerRebateBps);
+  return null;
+}
+
+function paperProbeNotionalUsd(): number {
+  const parsed = Number(process.env.CRYPTOCRAWL_MAKER_PAPER_NOTIONAL_USD || 1_000);
+  return Math.max(10, Math.min(5_000, Number.isFinite(parsed) ? parsed : 1_000));
+}
+
+function measuredConditionalMakerEconomics(input: {
+  buyQuote: StreamOrderBookQuote;
+  sellQuote: StreamOrderBookQuote;
+  buyMakerFeeBps: number;
+  sellMakerFeeBps: number;
+  notionalUsd: number;
+}): ConditionalMakerEconomics | null {
+  if (!(input.notionalUsd > 0) || !(input.buyQuote.bid > 0) || !(input.sellQuote.ask > 0)) return null;
+  const quantity = input.notionalUsd / input.buyQuote.bid;
+  const buyNotionalUsd = input.buyQuote.bid * quantity;
+  const sellNotionalUsd = input.sellQuote.ask * quantity;
+  const grossProfitUsd = sellNotionalUsd - buyNotionalUsd;
+  const feeUsd = (buyNotionalUsd * input.buyMakerFeeBps + sellNotionalUsd * input.sellMakerFeeBps) / 10_000;
+  const netProfitUsd = grossProfitUsd - feeUsd;
+  const grossProfitBps = grossProfitUsd / input.notionalUsd * 10_000;
+  const netProfitBps = netProfitUsd / input.notionalUsd * 10_000;
+  if (![grossProfitUsd, feeUsd, grossProfitBps, netProfitBps].every(Number.isFinite)) return null;
+  return {
+    notionalUsd: input.notionalUsd,
+    grossProfitUsd,
+    feeUsd,
+    grossProfitBps,
+    netProfitBps,
+    bpsToBreakEven: netProfitBps < 0 ? Math.abs(netProfitBps) : 0,
+  };
+}
+
+function liveMakerTargetNotionalUsd(): number {
+  const ladder = getProfitLadderNotionalAuthority();
+  return ladder.maxNotionalUsd > 0 ? ladder.maxNotionalUsd : paperProbeNotionalUsd();
+}
+
+function makerDiscoverySymbolBudget(): number {
+  const parsed = Number(process.env.CRYPTOCRAWL_MAKER_DISCOVERY_SYMBOLS || 72);
+  return Math.max(12, Math.min(96, Number.isFinite(parsed) ? Math.floor(parsed) : 72));
+}
+
+function makerFeePrimeBudget(): number {
+  return makerDiscoverySymbolBudget();
+}
+
+function selectMakerFeePrimeTargets(viable: readonly ViableMakerSymbol[]): ViableMakerSymbol[] {
+  void makerFeePrimeBudget();
+  makerFeePrimeCursor = 0;
+  return [...viable];
+}
+
+function makerBookConcurrency(): number {
+  const parsed = Number(process.env.CRYPTOCRAWL_MAKER_BOOK_CONCURRENCY || 12);
+  return Math.max(2, Math.min(24, Number.isFinite(parsed) ? Math.floor(parsed) : 12));
+}
+
+function makerLiveEvaluationConcurrency(): number {
+  const parsed = Number(process.env.CRYPTOCRAWL_MAKER_LIVE_EVALUATION_CONCURRENCY || 4);
+  return Math.max(1, Math.min(8, Number.isFinite(parsed) ? Math.floor(parsed) : 4));
+}
+
+async function runBounded<T, R>(items: readonly T[], concurrency: number, worker: (item: T) => Promise<R>): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const count = Math.max(1, Math.min(items.length, concurrency));
+  await Promise.all(Array.from({ length: count }, async () => {
+    while (true) {
+      const index = cursor++;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index]);
+    }
+  }));
+  return results;
+}
+
+async function hasUsdNormalizedMakerEconomics(venue: CexFeeVenue, symbol: string): Promise<boolean> {
+  try {
+    const quoteAsset = venue === 'coinbase'
+      ? (await getCoinbaseAdvancedProductConstraints(symbol)).quoteAsset
+      : (await getSpotProductConstraints(venue, symbol)).quoteAsset;
+    return USD_NORMALIZED_QUOTES.has(quoteAsset.trim().toUpperCase());
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Every structurally viable maker symbol receives authenticated fee priming and a
+ * canonical live evaluation in the same discovery cycle. Batch/account-level fee
+ * acquisition is primary. If an OKX product has no fee group and was unresolved
+ * only by the resolver's rotating per-instrument budget, this layer immediately
+ * invokes the canonical per-instrument authority with forceRefresh. Products that
+ * had a failed grouped/account request are not fanned out, preserving the shared
+ * quota/rate governor and avoiding a request storm.
+ */
+export async function discoverMeasuredMakerCandidates(): Promise<MeasuredCandidate[]> {
+  const venues = getActiveExecutableQuoteVenues().filter(
+    (venue): venue is CexFeeVenue => venue === 'coinbase' || venue === 'kraken' || venue === 'okx',
+  );
+  if (venues.length < 2) return [];
+  const symbols = getLastOrderedMarketUniverseSymbols().slice(0, makerDiscoverySymbolBudget());
+  if (symbols.length === 0) return [];
+
+  const ttlMs = Math.max(1_000, Number(process.env.CRYPTOCRAWL_MAKER_CANDIDATE_TTL_MS || 5_000));
+  const maxQuoteAgeMs = Math.max(500, Number(process.env.CRYPTO_ARBITRAGE_MAX_QUOTE_AGE_MS || 5_000));
+  const output: MeasuredCandidate[] = [];
+
+  const measured = await runBounded(symbols, makerBookConcurrency(), async symbol => {
+    const measuredBooks = await Promise.all(venues.map(async venue => {
+      const [quote, usdNormalized] = await Promise.all([
+        cexOrderBookStreams.getQuote(venue, symbol, maxQuoteAgeMs).catch(() => null),
+        hasUsdNormalizedMakerEconomics(venue, symbol),
+      ]);
+      return { venue, quote, usdNormalized } satisfies MeasuredMakerBook;
+    }));
+    return {
+      symbol,
+      usableBooks: measuredBooks.filter(entry => entry.quote !== null && entry.usdNormalized),
+    } satisfies ViableMakerSymbol;
+  });
+
+  const viable = measured.filter(entry => entry.usableBooks.length >= 2);
+  if (viable.length === 0) return [];
+  const feeTargets = selectMakerFeePrimeTargets(viable);
+
+  const coinbaseSymbols = feeTargets
+    .filter(entry => entry.usableBooks.some(book => book.venue === 'coinbase'))
+    .map(entry => entry.symbol);
+  const krakenSymbols = feeTargets
+    .filter(entry => entry.usableBooks.some(book => book.venue === 'kraken'))
+    .map(entry => entry.symbol);
+  const okxSymbols = feeTargets
+    .filter(entry => entry.usableBooks.some(book => book.venue === 'okx'))
+    .map(entry => entry.symbol);
+
+  const primeResult = await primeCexFeeEvidenceForVenueSymbols({
+    coinbase: coinbaseSymbols,
+    kraken: krakenSymbols,
+    okx: okxSymbols,
+  }).catch(() => null);
+
+  const unresolvedOkx = primeResult
+    ? primeResult.unresolved.filter(item => item.venue === 'okx')
+    : okxSymbols.map(symbol => ({ venue: 'okx' as const, symbol }));
+  const unresolvedOkxClassification = await runBounded(
+    unresolvedOkx,
+    makerLiveEvaluationConcurrency(),
+    async item => ({
+      item,
+      constraints: await getSpotProductConstraints('okx', item.symbol).catch(() => null),
+    }),
+  );
+  const ungroupedOkxFallback = unresolvedOkxClassification
+    .filter(entry => entry.constraints !== null && !entry.constraints.feeGroupId)
+    .map(entry => entry.item);
+  await runBounded(ungroupedOkxFallback, makerLiveEvaluationConcurrency(), async item => {
+    await resolveCexFeeEvidence('okx', item.symbol, { forceRefresh: true }).catch(() => null);
+    return item.symbol;
+  });
+
+  const liveTargetNotionalUsd = liveMakerTargetNotionalUsd();
+  const evaluatedLivePlans = await runBounded(viable, makerLiveEvaluationConcurrency(), async ({ symbol }) => ({
+    symbol,
+    plan: await evaluateMakerRecoveryCandidate({
+      symbol,
+      notionalUsd: liveTargetNotionalUsd,
+      maxQuoteAgeMs,
+    }).catch(() => null),
+  }));
+  const livePlanBySymbol = new Map(evaluatedLivePlans.map(item => [item.symbol, item.plan]));
+
+  for (const { symbol, usableBooks } of viable) {
+    const livePlan = livePlanBySymbol.get(symbol) ?? null;
+
+    if (livePlan && Number.isFinite(livePlan.netProfitUsd) && livePlan.netProfitUsd > 0) {
+      const observedAt = Date.now() - Math.max(0, livePlan.quoteAgeMs);
+      const buyBook = usableBooks.find(book => book.venue === livePlan.buyVenue)?.quote ?? null;
+      const sellBook = usableBooks.find(book => book.venue === livePlan.sellVenue)?.quote ?? null;
+      output.push(measuredCandidateRegistry.record({
+        opportunityId: `maker-live:${livePlan.buyVenue}->${livePlan.sellVenue}:${symbol}:${observedAt}`,
+        topology: 'MAKER_CEX',
+        observedAt,
+        expiresAt: observedAt + Math.max(1_000, Math.min(ttlMs, livePlan.makerExecution.ttlMs)),
+        status: 'eligible',
+        assets: [symbol],
+        venues: [livePlan.buyVenue, livePlan.sellVenue],
+        chains: ['cex'],
+        rawQuotes: [
+          ...(buyBook ? [{
+            source: `${livePlan.buyVenue}:order_book`, venue: livePlan.buyVenue, symbol,
+            observedAt: buyBook.timestamp, bid: buyBook.bid, ask: buyBook.ask,
+            executable: true, provenance: ['measured_bbo', 'maker_post_only_plan', 'websocket_hot_path'],
+          }] : []),
+          ...(sellBook ? [{
+            source: `${livePlan.sellVenue}:order_book`, venue: livePlan.sellVenue, symbol,
+            observedAt: sellBook.timestamp, bid: sellBook.bid, ask: sellBook.ask,
+            executable: true, provenance: ['measured_bbo', 'maker_post_only_plan', 'websocket_hot_path'],
+          }] : []),
+        ],
+        depth: {
+          status: 'measured',
+          detail: `Canonical post-only maker plan: baseQty=${livePlan.baseQty}, jointFill=${livePlan.makerExecution.queueEcho.jointFillProbability.toFixed(4)}, stressPersistence=${livePlan.makerExecution.spreadStress.persistenceProbability.toFixed(4)}`,
+        },
+        economics: {
+          grossProfitUsd: livePlan.grossProfitUsd,
+          deterministicNetProfitUsd: livePlan.netProfitUsd,
+          feeUsd: livePlan.costs.totalCostsUsd,
+          gasUsd: livePlan.costs.gasUsd,
+          bridgeUsd: livePlan.costs.bridgeFeeUsd,
+          expectedSlippageBps: livePlan.expectedSlippageBps,
+          expectedPriceImpactBps: livePlan.expectedPriceImpactBps,
+        },
+        quoteAgeMs: livePlan.quoteAgeMs,
+        executableCapability: true,
+        executionCapabilityReason: 'Fully measured Coinbase/Kraken/OKX post-only maker plan with USD-normalized quote evidence; downstream inventory, governance, canary, product, execution and terminal settlement gates remain mandatory',
+        missingInformation: [],
+        provenance: [
+          'canonical_maker_recovery_plan',
+          `maker_strategy:${livePlan.makerExecution.strategy}`,
+          `profit_ladder_target_notional_usd:${liveTargetNotionalUsd}`,
+          'maker_canary_is_tightening_only_beneath_profit_ladder',
+          'authenticated_maker_fee_evidence',
+          'usd_normalized_quote_evidence',
+          `maker_book_authority:${livePlan.makerExecution.bookAuthority}`,
+          `queue_authority:${livePlan.makerExecution.queueEcho.authority}`,
+          `canary_sizing_authority:${livePlan.makerExecution.canarySizingAuthority}`,
+          'post_only:true',
+          'taker_fallback:false',
+          'canonical_cex_venues:coinbase_kraken_okx',
+          'maker_first_pass:all_viable_symbols_live_evaluated',
+          'maker_fee_redundancy:batch_then_ungrouped_okx_force_refresh',
+          'strict_all_in_net_profit_gt_zero:true',
+          'terminal_settlement_still_required:true',
+          'synthetic_evidence:false',
+        ],
+      }));
+    }
+
+    const quotes = usableBooks.map(entry => ({
+      ...entry,
+      fee: getCachedCexFeeEvidence(entry.venue, symbol),
+    }));
+
+    for (const buy of quotes) {
+      for (const sell of quotes) {
+        if (buy.venue === sell.venue || !buy.quote || !sell.quote) continue;
+        const observedAt = Math.min(buy.quote.timestamp, sell.quote.timestamp);
+        const buyMakerFeeBps = effectiveMakerFeeBps(buy.fee);
+        const sellMakerFeeBps = effectiveMakerFeeBps(sell.fee);
+        const makerFeeKnown = buyMakerFeeBps !== null && sellMakerFeeBps !== null;
+        const conditionalEconomics = makerFeeKnown ? measuredConditionalMakerEconomics({
+          buyQuote: buy.quote,
+          sellQuote: sell.quote,
+          buyMakerFeeBps: buyMakerFeeBps!,
+          sellMakerFeeBps: sellMakerFeeBps!,
+          notionalUsd: paperProbeNotionalUsd(),
+        }) : null;
+        const paperProof = makerFeeKnown ? observeMakerPaperProof({
+          symbol,
+          buyVenue: buy.venue,
+          sellVenue: sell.venue,
+          buyQuote: buy.quote,
+          sellQuote: sell.quote,
+          buyFeeBps: buyMakerFeeBps!,
+          sellFeeBps: sellMakerFeeBps!,
+          notionalUsd: paperProbeNotionalUsd(),
+        }) : null;
+        const routeId = `${buy.venue}->${sell.venue}`;
+        output.push(measuredCandidateRegistry.record({
+          opportunityId: `maker-cex:${routeId}:${symbol}:${observedAt}`,
+          topology: 'MAKER_CEX',
+          observedAt,
+          expiresAt: observedAt + ttlMs,
+          status: 'blocked',
+          assets: [symbol],
+          venues: [buy.venue, sell.venue],
+          chains: [],
+          rawQuotes: [
+            {
+              source: `${buy.venue}:order_book`, venue: buy.venue, symbol,
+              observedAt: buy.quote.timestamp, bid: buy.quote.bid, ask: buy.quote.ask,
+              executable: false, provenance: ['measured_bbo', 'maker_conditional_only', 'websocket_hot_path'],
+            },
+            {
+              source: `${sell.venue}:order_book`, venue: sell.venue, symbol,
+              observedAt: sell.quote.timestamp, bid: sell.quote.bid, ask: sell.quote.ask,
+              executable: false, provenance: ['measured_bbo', 'maker_conditional_only', 'websocket_hot_path'],
+            },
+          ],
+          depth: {
+            status: 'measured',
+            detail: paperProof
+              ? `Live books + paper microstructure probe: state=${paperProof.state}, ttlMs=${paperProof.adaptiveTtlMs}, buyImbalance=${paperProof.buyMicrostructure.imbalance.toFixed(3)}, sellImbalance=${paperProof.sellMicrostructure.imbalance.toFixed(3)}`
+              : 'Live CEX order-book evidence exists; authenticated maker fee evidence was requested for this viable symbol but did not produce enough current evidence for a paired paper proof',
+          },
+          economics: {
+            grossProfitUsd: conditionalEconomics?.grossProfitUsd ?? null,
+            deterministicNetProfitUsd: null,
+            feeUsd: conditionalEconomics?.feeUsd ?? null,
+            gasUsd: 0,
+            bridgeUsd: 0,
+            expectedSlippageBps: null,
+            expectedPriceImpactBps: null,
+            notionalUsd: conditionalEconomics?.notionalUsd ?? null,
+            grossProfitBps: conditionalEconomics?.grossProfitBps ?? null,
+            netProfitBps: conditionalEconomics?.netProfitBps ?? null,
+            bpsToBreakEven: conditionalEconomics?.bpsToBreakEven ?? null,
+          },
+          quoteAgeMs: Math.max(0, Date.now() - observedAt),
+          executableCapability: false,
+          executionCapabilityReason: 'Paper maker proof is telemetry only; every viable symbol already received same-cycle authenticated fee acquisition plus canonical live evaluation, and only that measured live plan can gain execution authority',
+          missingInformation: [
+            ...(makerFeeKnown ? [] : ['required:authenticated_maker_fee_evidence']),
+            'required:fully_measured_canonical_maker_plan',
+          ],
+          provenance: [
+            'maker_order_not_assumed_filled',
+            'conditional_topology_only',
+            'microprice_queue_imbalance_shadow_model',
+            'adaptive_maker_ttl_shadow_model',
+            'maker_fee_prime:all_viable_symbols_first_pass',
+            'maker_fee_redundancy:batch_then_ungrouped_okx_force_refresh',
+            'maker_live_evaluation:all_viable_symbols_first_pass',
+            'usd_normalized_quote_evidence',
+            'canonical_cex_venues:coinbase_kraken_okx',
+            ...(conditionalEconomics ? [
+              'maker_conditional_bps:measured_live_books_plus_authenticated_fees',
+              'maker_conditional_bps_execution_authority:false',
+            ] : []),
+            ...(paperProof ? [`paper_probe:${paperProof.state}`, `paper_probe_ttl_ms:${paperProof.adaptiveTtlMs}`] : []),
+            ...(paperProof?.paperNetProfitUsd !== null && paperProof?.paperNetProfitUsd !== undefined
+              ? [`paper_net_profit_usd:${paperProof.paperNetProfitUsd.toFixed(6)}`]
+              : []),
+            ...(buy.fee ? [`fee:${buy.venue}:${buy.fee.source}`] : []),
+            ...(sell.fee ? [`fee:${sell.venue}:${sell.fee.source}`] : []),
+            'paper_evidence_only:true',
+            'realized_profit_credit:false',
+          ],
+        }));
+      }
+    }
+  }
+  return output;
+}

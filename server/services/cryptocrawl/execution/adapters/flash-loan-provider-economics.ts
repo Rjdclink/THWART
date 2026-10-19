@@ -1,0 +1,655 @@
+import { Contract, BigNumber, ethers, providers } from 'ethers';
+import { multiProviderRpcManager, type SupportedChain as RpcSupportedChain } from '../../api/blockchain-providers.js';
+import type { SupportedExecutionChain } from './onchain-payload-builder.js';
+import { getFlashLoanDemandHint } from './flash-loan-demand-hint.js';
+import { resolveSponsoredReceiverVault } from './sponsored-receiver-manager.js';
+
+export type FlashLoanProviderKind = 'balancer_v2' | 'aave_v3' | 'morpho_blue';
+
+export interface FlashLoanProviderEconomics {
+  provider: FlashLoanProviderKind;
+  chain: SupportedExecutionChain;
+  infrastructure: string;
+  asset: string;
+  availableLiquidity: bigint | null;
+  feeBps: number | null;
+  feeRateNumerator: bigint | null;
+  feeRateDenominator: bigint | null;
+  observedAt: number;
+  executableEvidenceComplete: boolean;
+  missingEvidence: string[];
+  provenance: string[];
+}
+
+export interface FlashLoanProviderMeasurementTelemetry {
+  logicalRequests: number;
+  residentHits: number;
+  physicalMeasurementStarts: number;
+  singleflightJoins: number;
+  prewarmRequests: number;
+  residentKeys: number;
+  inFlightKeys: number;
+}
+
+const ERC20_ABI = ['function balanceOf(address account) view returns (uint256)'];
+const BALANCER_VAULT_ABI = ['function getProtocolFeesCollector() view returns (address)'];
+const BALANCER_FEES_ABI = ['function getFlashLoanFeePercentage() view returns (uint256)'];
+const AAVE_POOL_ABI = [
+  'function FLASHLOAN_PREMIUM_TOTAL() view returns (uint128)',
+  'function getReserveAToken(address asset) view returns (address)',
+  'function ADDRESSES_PROVIDER() view returns (address)',
+];
+const AAVE_ADDRESSES_PROVIDER_ABI = [
+  'function getPoolDataProvider() view returns (address)',
+];
+const AAVE_DATA_PROVIDER_ABI = [
+  'function getReserveTokensAddresses(address asset) view returns (address aTokenAddress,address stableDebtTokenAddress,address variableDebtTokenAddress)',
+  'function getFlashLoanEnabled(address asset) view returns (bool)',
+];
+const BALANCER_FIXED_POINT_ONE = 10n ** 18n;
+const AAVE_BPS_DENOMINATOR = 10_000n;
+
+// One chain/asset provider race is shared across all downstream APE consumers.
+// The candidate never depends on this cache for identity or survival: stale/missing
+// evidence causes a new shared measurement generation, never candidate deletion.
+const residentFlashProviderEvidence = new Map<string, FlashLoanProviderEconomics[]>();
+const flashProviderEvidenceInFlight = new Map<string, Promise<FlashLoanProviderEconomics[]>>();
+const measurementTelemetry = {
+  logicalRequests: 0,
+  residentHits: 0,
+  physicalMeasurementStarts: 0,
+  singleflightJoins: 0,
+  prewarmRequests: 0,
+};
+
+export function getFlashLoanProviderMeasurementTelemetry(): FlashLoanProviderMeasurementTelemetry {
+  return {
+    ...measurementTelemetry,
+    residentKeys: residentFlashProviderEvidence.size,
+    inFlightKeys: flashProviderEvidenceInFlight.size,
+  };
+}
+
+function residentProviderEvidenceMaxAgeMs(): number {
+  const configured = Number(process.env.ZERO_CAPITAL_PROVIDER_EVIDENCE_MAX_AGE_MS || 5_000);
+  return Number.isFinite(configured) ? Math.max(500, Math.min(30_000, Math.trunc(configured))) : 5_000;
+}
+
+function providerEvidenceKey(chain: SupportedExecutionChain, asset: string): string {
+  return `${chain}:${asset.toLowerCase()}`;
+}
+
+export function peekResidentFlashLoanProviderEvidence(
+  chain: SupportedExecutionChain,
+  asset: string,
+  maxAgeMs = residentProviderEvidenceMaxAgeMs(),
+  now = Date.now(),
+): FlashLoanProviderEconomics[] {
+  const evidence = residentFlashProviderEvidence.get(providerEvidenceKey(chain, asset)) ?? [];
+  return evidence.filter(item => now - item.observedAt <= maxAgeMs);
+}
+
+// Morpho Blue's core interface defines flashFee as exactly zero and maxFlashLoan
+// as the token balance held by the singleton. Addresses are public on-chain
+// infrastructure, not credentials. Environment overrides remain authoritative so
+// new deployments can be added without code changes.
+const MORPHO_BLUE_DEFAULTS: Partial<Record<SupportedExecutionChain, string>> = {
+  ethereum: '0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb',
+  base: '0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb',
+  polygon: '0x1bF0c2541F820E775182832f06c0B7Fc27A25f67',
+  arbitrum: '0x6c247b1F6182318877311737BaC0844bAa518F5e',
+  optimism: '0xce95AfbB8EA029495c66020883F87aaE8864AF92',
+};
+
+function requireAddress(label: string, value: string): string {
+  if (!ethers.utils.isAddress(value)) throw new Error(`${label} must be a valid EVM address`);
+  return ethers.utils.getAddress(value);
+}
+
+function requireNonZeroAddress(label: string, value: string): string {
+  const address = requireAddress(label, value);
+  if (address === ethers.constants.AddressZero) throw new Error(`${label} must not be the zero address`);
+  return address;
+}
+
+function parseAddressMap(raw: string | undefined, label: string): Partial<Record<SupportedExecutionChain, string>> {
+  if (!raw?.trim()) return {};
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new Error(`${label} must be valid JSON`);
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be a JSON object keyed by chain`);
+  const result: Partial<Record<SupportedExecutionChain, string>> = {};
+  for (const [chain, address] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof address !== 'string' || !address.trim()) continue;
+    result[chain as SupportedExecutionChain] = requireNonZeroAddress(`${label}.${chain}`, address);
+  }
+  return result;
+}
+
+export function resolveAaveV3Pool(
+  chain: SupportedExecutionChain,
+  environment: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const mapped = parseAddressMap(environment.ZERO_CAPITAL_AAVE_V3_POOLS, 'ZERO_CAPITAL_AAVE_V3_POOLS');
+  const chainSpecific = environment[`ZERO_CAPITAL_AAVE_V3_POOL_${chain.toUpperCase()}`]?.trim();
+  const candidate = chainSpecific || mapped[chain];
+  return candidate ? requireNonZeroAddress(`Aave V3 pool for ${chain}`, candidate) : null;
+}
+
+export function resolveMorphoBlue(
+  chain: SupportedExecutionChain,
+  environment: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const mapped = parseAddressMap(environment.ZERO_CAPITAL_MORPHO_BLUE_CONTRACTS, 'ZERO_CAPITAL_MORPHO_BLUE_CONTRACTS');
+  const chainSpecific = environment[`ZERO_CAPITAL_MORPHO_BLUE_${chain.toUpperCase()}`]?.trim();
+  const candidate = chainSpecific || mapped[chain] || MORPHO_BLUE_DEFAULTS[chain];
+  return candidate ? requireNonZeroAddress(`Morpho Blue for ${chain}`, candidate) : null;
+}
+
+export function calculateMeasuredFlashLoanFee(
+  evidence: FlashLoanProviderEconomics,
+  amount: bigint,
+): bigint | null {
+  if (amount < 0n || evidence.feeRateNumerator === null || evidence.feeRateDenominator === null || evidence.feeRateDenominator <= 0n) return null;
+  if (evidence.feeRateNumerator < 0n) return null;
+  if (amount === 0n || evidence.feeRateNumerator === 0n) return 0n;
+  return (amount * evidence.feeRateNumerator + evidence.feeRateDenominator - 1n) / evidence.feeRateDenominator;
+}
+
+export async function measureBalancerFlashLoanEconomics(input: {
+  chain: SupportedExecutionChain;
+  provider: providers.Provider;
+  asset: string;
+}): Promise<FlashLoanProviderEconomics | null> {
+  const vault = resolveSponsoredReceiverVault(input.chain);
+  if (!vault) return null;
+  const asset = requireNonZeroAddress('flash-loan asset', input.asset);
+  const vaultContract = new Contract(vault, BALANCER_VAULT_ABI, input.provider);
+  const token = new Contract(asset, ERC20_ABI, input.provider);
+  const feeCollectorAddress = requireNonZeroAddress(
+    'Balancer ProtocolFeesCollector',
+    await vaultContract.getProtocolFeesCollector() as string,
+  );
+  const feeCollector = new Contract(feeCollectorAddress, BALANCER_FEES_ABI, input.provider);
+  const [liquidityRaw, feePercentageRaw] = await Promise.all([
+    token.balanceOf(vault) as Promise<BigNumber>,
+    feeCollector.getFlashLoanFeePercentage() as Promise<BigNumber>,
+  ]);
+  const feeRateNumerator = feePercentageRaw.toBigInt();
+  const feeBps = Number(feePercentageRaw.toString()) / 1e14;
+  const feeMeasured = feeRateNumerator >= 0n && Number.isFinite(feeBps) && feeBps >= 0;
+  return {
+    provider: 'balancer_v2',
+    chain: input.chain,
+    infrastructure: vault,
+    asset,
+    availableLiquidity: liquidityRaw.toBigInt(),
+    feeBps: feeMeasured ? feeBps : null,
+    feeRateNumerator: feeMeasured ? feeRateNumerator : null,
+    feeRateDenominator: feeMeasured ? BALANCER_FIXED_POINT_ONE : null,
+    observedAt: Date.now(),
+    executableEvidenceComplete: feeMeasured && liquidityRaw.gt(0),
+    missingEvidence: [
+      ...(!feeMeasured ? ['flash_loan_fee'] : []),
+      ...(liquidityRaw.lte(0) ? ['flash_loan_liquidity'] : []),
+    ],
+    provenance: [
+      'balancer_v2_vault_token_balance',
+      'balancer_protocol_fees_collector_flash_loan_fee_exact_fixed_point',
+      'synthetic_evidence:false',
+    ],
+  };
+}
+
+async function resolveAaveReserveEvidence(input: {
+  pool: Contract;
+  provider: providers.Provider;
+  asset: string;
+}): Promise<{
+  aTokenAddress: string | null;
+  flashLoanEnabled: boolean | null;
+  provenance: string[];
+}> {
+  let aTokenAddress: string | null = null;
+  const provenance: string[] = [];
+
+  try {
+    aTokenAddress = requireNonZeroAddress('Aave V3 reserve aToken', await input.pool.getReserveAToken(input.asset) as string);
+    provenance.push('aave_v3_pool_getReserveAToken');
+  } catch {
+    // Older V3 deployments are handled through the AddressesProvider path.
+  }
+
+  let dataProvider: Contract | null = null;
+  try {
+    const addressesProviderAddress = requireNonZeroAddress(
+      'Aave V3 PoolAddressesProvider',
+      await input.pool.ADDRESSES_PROVIDER() as string,
+    );
+    const addressesProvider = new Contract(addressesProviderAddress, AAVE_ADDRESSES_PROVIDER_ABI, input.provider);
+    const dataProviderAddress = requireNonZeroAddress(
+      'Aave V3 PoolDataProvider',
+      await addressesProvider.getPoolDataProvider() as string,
+    );
+    dataProvider = new Contract(dataProviderAddress, AAVE_DATA_PROVIDER_ABI, input.provider);
+    provenance.push('aave_v3_pool_ADDRESSES_PROVIDER', 'aave_v3_addresses_provider_getPoolDataProvider');
+  } catch {
+    dataProvider = null;
+  }
+
+  if (!aTokenAddress && dataProvider) {
+    try {
+      const reserveTokens = await dataProvider.getReserveTokensAddresses(input.asset) as [string, string, string];
+      aTokenAddress = requireNonZeroAddress('Aave V3 reserve aToken', reserveTokens[0]);
+      provenance.push('aave_v3_data_provider_getReserveTokensAddresses');
+    } catch {
+      aTokenAddress = null;
+    }
+  }
+
+  let flashLoanEnabled: boolean | null = null;
+  if (dataProvider) {
+    try {
+      flashLoanEnabled = await dataProvider.getFlashLoanEnabled(input.asset) as boolean;
+      provenance.push('aave_v3_data_provider_getFlashLoanEnabled');
+    } catch {
+      flashLoanEnabled = null;
+    }
+  }
+
+  return { aTokenAddress, flashLoanEnabled, provenance };
+}
+
+export async function measureAaveV3FlashLoanEconomics(input: {
+  chain: SupportedExecutionChain;
+  provider: providers.Provider;
+  asset: string;
+}): Promise<FlashLoanProviderEconomics | null> {
+  const poolAddress = resolveAaveV3Pool(input.chain);
+  if (!poolAddress) return null;
+  const asset = requireNonZeroAddress('flash-loan asset', input.asset);
+  const pool = new Contract(poolAddress, AAVE_POOL_ABI, input.provider);
+
+  const reserveEvidence = await resolveAaveReserveEvidence({ pool, provider: input.provider, asset });
+  let availableLiquidity: bigint | null = null;
+  let liquidityMeasured = false;
+  if (reserveEvidence.aTokenAddress) {
+    try {
+      const token = new Contract(asset, ERC20_ABI, input.provider);
+      const liquidityRaw = await token.balanceOf(reserveEvidence.aTokenAddress) as BigNumber;
+      availableLiquidity = liquidityRaw.toBigInt();
+      liquidityMeasured = liquidityRaw.gt(0);
+    } catch {
+      availableLiquidity = null;
+      liquidityMeasured = false;
+    }
+  }
+
+  let premiumRaw: BigNumber | null = null;
+  try {
+    premiumRaw = BigNumber.from(await pool.FLASHLOAN_PREMIUM_TOTAL());
+  } catch {
+    premiumRaw = null;
+  }
+  const feeRateNumerator = premiumRaw?.toBigInt() ?? null;
+  const feeBps = premiumRaw ? Number(premiumRaw.toString()) : null;
+  const feeMeasured = feeRateNumerator !== null && feeRateNumerator >= 0n && feeBps !== null && Number.isFinite(feeBps) && feeBps >= 0;
+  const flashLoanEnablementMeasured = reserveEvidence.flashLoanEnabled !== null;
+  const flashLoanEnabled = reserveEvidence.flashLoanEnabled === true;
+
+  return {
+    provider: 'aave_v3',
+    chain: input.chain,
+    infrastructure: poolAddress,
+    asset,
+    availableLiquidity,
+    feeBps: feeMeasured ? feeBps : null,
+    feeRateNumerator: feeMeasured ? feeRateNumerator : null,
+    feeRateDenominator: feeMeasured ? AAVE_BPS_DENOMINATOR : null,
+    observedAt: Date.now(),
+    executableEvidenceComplete: feeMeasured && liquidityMeasured && flashLoanEnablementMeasured && flashLoanEnabled,
+    missingEvidence: [
+      ...(!feeMeasured ? ['flash_loan_fee'] : []),
+      ...(!liquidityMeasured ? ['flash_loan_liquidity'] : []),
+      ...(!flashLoanEnablementMeasured ? ['flash_loan_enablement'] : []),
+      ...(flashLoanEnablementMeasured && !flashLoanEnabled ? ['flash_loan_disabled_for_reserve'] : []),
+    ],
+    provenance: [
+      'aave_v3_pool_FLASHLOAN_PREMIUM_TOTAL',
+      ...reserveEvidence.provenance,
+      ...(reserveEvidence.aTokenAddress
+        ? ['aave_v3_underlying_balance_at_atoken']
+        : ['aave_v3_reserve_liquidity_unavailable']),
+      ...(flashLoanEnablementMeasured
+        ? [`aave_v3_flash_loan_enabled:${flashLoanEnabled}`]
+        : ['aave_v3_flash_loan_enablement_unavailable']),
+      'receiver_readiness_separate_authority',
+      'synthetic_evidence:false',
+    ],
+  };
+}
+
+export async function measureMorphoBlueFlashLoanEconomics(input: {
+  chain: SupportedExecutionChain;
+  provider: providers.Provider;
+  asset: string;
+}): Promise<FlashLoanProviderEconomics | null> {
+  const morpho = resolveMorphoBlue(input.chain);
+  if (!morpho) return null;
+  const asset = requireNonZeroAddress('flash-loan asset', input.asset);
+  const [code, liquidityRaw] = await Promise.all([
+    input.provider.getCode(morpho),
+    new Contract(asset, ERC20_ABI, input.provider).balanceOf(morpho) as Promise<BigNumber>,
+  ]);
+  const codePresent = code !== '0x';
+  const liquidityMeasured = liquidityRaw.gt(0);
+  return {
+    provider: 'morpho_blue',
+    chain: input.chain,
+    infrastructure: morpho,
+    asset,
+    availableLiquidity: liquidityRaw.toBigInt(),
+    feeBps: 0,
+    feeRateNumerator: 0n,
+    feeRateDenominator: 1n,
+    observedAt: Date.now(),
+    executableEvidenceComplete: codePresent && liquidityMeasured,
+    missingEvidence: [
+      ...(!codePresent ? ['morpho_contract_bytecode'] : []),
+      ...(!liquidityMeasured ? ['flash_loan_liquidity'] : []),
+    ],
+    provenance: [
+      'morpho_blue_core_flashFee_zero_by_interface',
+      'morpho_blue_maxFlashLoan_equals_contract_token_balance',
+      'morpho_blue_contract_bytecode_checked',
+      'morpho_blue_token_balance_measured',
+      'receiver_readiness_separate_authority',
+      'synthetic_evidence:false',
+    ],
+  };
+}
+
+function providerMeasurementTimeoutMs(): number {
+  const configured = Number(process.env.ZERO_CAPITAL_FLASH_PROVIDER_MEASUREMENT_TIMEOUT_MS || 5_000);
+  return Number.isFinite(configured) ? Math.max(250, Math.min(15_000, Math.trunc(configured))) : 5_000;
+}
+
+function withProviderMeasurementTimeout<T>(promise: Promise<T>, timeoutMs: number, provider: FlashLoanProviderKind): Promise<T> {
+  const boundedMs = Math.max(1, Math.trunc(timeoutMs));
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${provider} flash-loan measurement exceeded ${boundedMs}ms evidence deadline`)),
+      boundedMs,
+    );
+    timer.unref?.();
+    promise.then(
+      value => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      error => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+function providerUrl(provider: providers.Provider): string | null {
+  const url = (provider as providers.JsonRpcProvider & { connection?: { url?: string } }).connection?.url;
+  return typeof url === 'string' && url.trim() ? url.trim() : null;
+}
+
+function isCanonicalManagedProvider(chain: SupportedExecutionChain, provider: providers.Provider): boolean {
+  if (chain === 'europa') return false;
+  const url = providerUrl(provider);
+  if (!url) return false;
+  return multiProviderRpcManager.getHealth(chain as RpcSupportedChain).some(row => row.httpUrl === url);
+}
+
+async function measureWithRouteLocalFailover(
+  input: { chain: SupportedExecutionChain; provider: providers.Provider; asset: string },
+  kind: FlashLoanProviderKind,
+  measure: (provider: providers.Provider) => Promise<FlashLoanProviderEconomics | null>,
+  timeoutMs: number,
+): Promise<FlashLoanProviderEconomics | null> {
+  try {
+    return await withProviderMeasurementTimeout(measure(input.provider), timeoutMs, kind);
+  } catch (primaryError) {
+    if (!isCanonicalManagedProvider(input.chain, input.provider)) throw primaryError;
+    try {
+      const { result } = await multiProviderRpcManager.execute(
+        input.chain as RpcSupportedChain,
+        'contract_calls',
+        rpc => withProviderMeasurementTimeout(measure(rpc), timeoutMs, kind),
+      );
+      return result;
+    } catch (failoverError) {
+      const primary = primaryError instanceof Error ? primaryError.message : String(primaryError);
+      const failover = failoverError instanceof Error ? failoverError.message : String(failoverError);
+      throw new Error(`${kind} flash-loan evidence failed on the current RPC and canonical route-local failover: primary=${primary}; failover=${failover}`);
+    }
+  }
+}
+
+function upsertEvidence(target: FlashLoanProviderEconomics[], value: FlashLoanProviderEconomics): void {
+  const index = target.findIndex(item => item.provider === value.provider);
+  if (index < 0) target.push(value);
+  else if (value.observedAt >= target[index].observedAt) target[index] = value;
+}
+
+function dualEvidenceCanFund(
+  evidence: readonly FlashLoanProviderEconomics[],
+  requestedAmount: bigint,
+): boolean {
+  const complete = (item: FlashLoanProviderEconomics | undefined): item is FlashLoanProviderEconomics => Boolean(
+    item
+    && item.executableEvidenceComplete
+    && item.availableLiquidity !== null
+    && item.availableLiquidity > 0n
+    && item.feeBps !== null
+    && item.feeRateNumerator !== null
+    && item.feeRateDenominator !== null,
+  );
+  const balancer = evidence.find(item => item.provider === 'balancer_v2');
+  const aave = evidence.find(item => item.provider === 'aave_v3');
+  if (!complete(balancer) || !complete(aave)) return false;
+  return balancer.availableLiquidity! + aave.availableLiquidity! >= requestedAmount;
+}
+
+async function measureFlashLoanProvidersUncached(input: {
+  chain: SupportedExecutionChain;
+  provider: providers.Provider;
+  asset: string;
+}): Promise<FlashLoanProviderEconomics[]> {
+  const timeoutMs = providerMeasurementTimeoutMs();
+  const attempts: Array<{ kind: FlashLoanProviderKind; promise: Promise<FlashLoanProviderEconomics | null> }> = [];
+
+  if (resolveSponsoredReceiverVault(input.chain)) {
+    attempts.push({
+      kind: 'balancer_v2',
+      promise: measureWithRouteLocalFailover(
+        input,
+        'balancer_v2',
+        provider => measureBalancerFlashLoanEconomics({ ...input, provider }),
+        timeoutMs,
+      ),
+    });
+  }
+  if (resolveAaveV3Pool(input.chain)) {
+    attempts.push({
+      kind: 'aave_v3',
+      promise: measureWithRouteLocalFailover(
+        input,
+        'aave_v3',
+        provider => measureAaveV3FlashLoanEconomics({ ...input, provider }),
+        timeoutMs,
+      ),
+    });
+  }
+  if (resolveMorphoBlue(input.chain)) {
+    attempts.push({
+      kind: 'morpho_blue',
+      promise: measureWithRouteLocalFailover(
+        input,
+        'morpho_blue',
+        provider => measureMorphoBlueFlashLoanEconomics({ ...input, provider }),
+        timeoutMs,
+      ),
+    });
+  }
+
+  if (attempts.length === 0) return [];
+
+  const requestedAmount = getFlashLoanDemandHint(input.chain, input.asset);
+  if (requestedAmount === null || requestedAmount <= 0n) {
+    const settled = await Promise.allSettled(attempts.map(attempt => attempt.promise));
+    const evidence = settled.flatMap(result =>
+      result.status === 'fulfilled' && result.value ? [result.value] : [],
+    );
+    if (evidence.length === 0 && settled.every(result => result.status === 'rejected')) {
+      const failures = settled.map((result, index) => {
+        const kind = attempts[index].kind;
+        const reason = result.status === 'rejected'
+          ? result.reason instanceof Error ? result.reason.message : String(result.reason)
+          : 'no evidence';
+        return `${kind}:${reason}`;
+      });
+      throw new Error(`All applicable flash-loan provider measurements failed for ${input.chain}: ${failures.join(' | ')}`);
+    }
+    return evidence;
+  }
+
+  return new Promise<FlashLoanProviderEconomics[]>((resolve, reject) => {
+    const evidence: FlashLoanProviderEconomics[] = [];
+    const failures: string[] = [];
+    let remaining = attempts.length;
+    let resolved = false;
+
+    const amountFundable = () =>
+      selectMeasuredFlashLoanProvider(evidence, requestedAmount) !== null
+      || dualEvidenceCanFund(evidence, requestedAmount);
+
+    const maybeResolve = () => {
+      if (resolved || !amountFundable()) return;
+      resolved = true;
+      resolve(evidence);
+    };
+
+    const finish = () => {
+      if (remaining > 0) return;
+      if (resolved) return;
+      if (evidence.length === 0 && failures.length === attempts.length) {
+        reject(new Error(`All applicable flash-loan provider measurements failed for ${input.chain}: ${failures.join(' | ')}`));
+        return;
+      }
+      resolved = true;
+      resolve(evidence);
+    };
+
+    for (const attempt of attempts) {
+      void attempt.promise.then(value => {
+        if (value) upsertEvidence(evidence, value);
+        remaining -= 1;
+        maybeResolve();
+        finish();
+      }).catch(error => {
+        failures.push(`${attempt.kind}:${error instanceof Error ? error.message : String(error)}`);
+        remaining -= 1;
+        finish();
+      });
+    }
+  });
+}
+
+function startSharedFlashProviderMeasurement(input: {
+  chain: SupportedExecutionChain;
+  provider: providers.Provider;
+  asset: string;
+}): Promise<FlashLoanProviderEconomics[]> {
+  const key = providerEvidenceKey(input.chain, input.asset);
+  const existing = flashProviderEvidenceInFlight.get(key);
+  if (existing) {
+    measurementTelemetry.singleflightJoins += 1;
+    return existing;
+  }
+
+  measurementTelemetry.physicalMeasurementStarts += 1;
+  const pending = measureFlashLoanProvidersUncached(input).then(measured => {
+    const current = residentFlashProviderEvidence.get(key) ?? [];
+    const merged = [...current];
+    for (const item of measured) upsertEvidence(merged, item);
+    residentFlashProviderEvidence.set(key, merged);
+    return merged;
+  }).finally(() => {
+    if (flashProviderEvidenceInFlight.get(key) === pending) flashProviderEvidenceInFlight.delete(key);
+  });
+  flashProviderEvidenceInFlight.set(key, pending);
+  return pending;
+}
+
+export function prewarmFlashLoanProviderEvidence(input: {
+  chain: SupportedExecutionChain;
+  provider: providers.Provider;
+  asset: string;
+}): Promise<FlashLoanProviderEconomics[]> {
+  measurementTelemetry.prewarmRequests += 1;
+  return startSharedFlashProviderMeasurement(input);
+}
+
+export async function measureFlashLoanProviders(input: {
+  chain: SupportedExecutionChain;
+  provider: providers.Provider;
+  asset: string;
+}): Promise<FlashLoanProviderEconomics[]> {
+  measurementTelemetry.logicalRequests += 1;
+  const requestedAmount = getFlashLoanDemandHint(input.chain, input.asset);
+  const resident = peekResidentFlashLoanProviderEvidence(input.chain, input.asset);
+  if (
+    requestedAmount !== null
+    && requestedAmount > 0n
+    && resident.length > 0
+    && (
+      selectMeasuredFlashLoanProvider(resident, requestedAmount) !== null
+      || dualEvidenceCanFund(resident, requestedAmount)
+    )
+  ) {
+    measurementTelemetry.residentHits += 1;
+    const maxAgeMs = residentProviderEvidenceMaxAgeMs();
+    const oldestObservedAt = resident.reduce((minimum, item) => Math.min(minimum, item.observedAt), Date.now());
+    if (Date.now() - oldestObservedAt >= Math.floor(maxAgeMs / 2)) {
+      void startSharedFlashProviderMeasurement(input).catch(() => undefined);
+    }
+    return resident;
+  }
+  return startSharedFlashProviderMeasurement(input);
+}
+
+export function selectMeasuredFlashLoanProvider(
+  evidence: readonly FlashLoanProviderEconomics[],
+  requestedAmount: bigint,
+  allowedProviders: readonly FlashLoanProviderKind[] = ['morpho_blue', 'aave_v3', 'balancer_v2'],
+): FlashLoanProviderEconomics | null {
+  const allowed = new Set<FlashLoanProviderKind>(allowedProviders);
+  const eligible = evidence
+    .filter(item =>
+      allowed.has(item.provider) &&
+      item.executableEvidenceComplete &&
+      item.availableLiquidity !== null &&
+      item.availableLiquidity >= requestedAmount &&
+      item.feeBps !== null &&
+      item.feeRateNumerator !== null &&
+      item.feeRateDenominator !== null,
+    )
+    .sort((left, right) => {
+      const feeDelta = (left.feeBps ?? Number.POSITIVE_INFINITY) - (right.feeBps ?? Number.POSITIVE_INFINITY);
+      if (feeDelta !== 0) return feeDelta;
+      const leftLiquidity = left.availableLiquidity ?? 0n;
+      const rightLiquidity = right.availableLiquidity ?? 0n;
+      return leftLiquidity === rightLiquidity ? 0 : leftLiquidity > rightLiquidity ? -1 : 1;
+    });
+  return eligible[0] ?? null;
+}

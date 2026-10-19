@@ -4,7 +4,7 @@ import { build as esbuildBuild } from 'esbuild';
 // Archived trading-only Vite worker hook extracted from LegalWhat's frontend build.
 const __dirname = process.cwd();
 
-function cryptocrawlMonteCarloWorkerBuild() {
+export function monteCarloWorkerAssetPlugin() {
   return {
     name: "cryptocrawl-monte-carlo-worker-build",
     apply: "build" as const,

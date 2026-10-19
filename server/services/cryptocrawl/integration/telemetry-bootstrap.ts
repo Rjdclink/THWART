@@ -1,0 +1,314 @@
+import { captureCryptoCrawlerWorkGuard } from '../runtime/manual-power-state.js';
+import logger from '../../../logger.js';
+import { ensureProviderMeshPendingStream, providerMeshPendingStream } from '../capital-free/provider-mesh-pending-stream.js';
+import { multiProviderRpcManager, type SupportedChain } from '../api/blockchain-providers.js';
+import { marketDataProviders } from '../intelligence/market-data-providers.js';
+import { SUPPORTED_CHAINS } from '../bridge/chain-config.js';
+import {
+  adoptResolvedEnvironmentVariable,
+  resolveCoinStatsEnvironment,
+} from '../runtime/environment-contract.js';
+import { getCryptoCrawlerRuntimeAttestation } from '../runtime/runtime-attestation.js';
+import { getCryptoCrawlerCoreRuntimeStatus } from '../runtime/core-runtime.js';
+import { ensureDynamicRpcProviderWiring } from '../runtime/dynamic-rpc-provider-wiring.js';
+import { admitAnkrFallback } from '../runtime/rpc-fallback-admission-policy.js';
+
+const TELEMETRY_CHAINS: SupportedChain[] = [
+  'ethereum',
+  'polygon',
+  'arbitrum',
+  'optimism',
+  'base',
+  'avalanche',
+  'bsc',
+];
+
+const ANKR_PUBLIC_HTTP: Partial<Record<SupportedChain, string>> = {
+  ethereum: 'https://rpc.ankr.com/eth',
+  polygon: 'https://rpc.ankr.com/polygon',
+  arbitrum: 'https://rpc.ankr.com/arbitrum',
+  optimism: 'https://rpc.ankr.com/optimism',
+  base: 'https://rpc.ankr.com/base',
+  avalanche: 'https://rpc.ankr.com/avalanche',
+  bsc: 'https://rpc.ankr.com/bsc',
+};
+
+const ANKR_SLUGS: Partial<Record<SupportedChain, string>> = {
+  ethereum: 'eth',
+  polygon: 'polygon',
+  arbitrum: 'arbitrum',
+  optimism: 'optimism',
+  base: 'base',
+  avalanche: 'avalanche',
+  bsc: 'bsc',
+};
+
+let bootstrapPromise: Promise<void> | null = null;
+let bootstrapGeneration = 0;
+
+function logExecutionPosture(): void {
+  const coinbaseConfigured = !!(
+    (process.env.COINBASE_API_KEY?.trim() || process.env.COINBASE_KEY_NAME?.trim() || process.env.CDP_API_KEY_NAME?.trim())
+    && (process.env.COINBASE_API_SECRET?.trim() || process.env.COINBASE_KEY_SECRET?.trim() || process.env.CDP_API_KEY_SECRET?.trim())
+  );
+  logger.info('[TelemetryBootstrap] Production execution posture', {
+    component: 'TelemetryBootstrap',
+    noExecutionGuardEnabled: process.env.NO_EXECUTION === 'true',
+    liveExecutionEnabled: process.env.CRYPTO_ARBITRAGE_LIVE_EXECUTION === 'true',
+    liveExecutionConfirmed: process.env.CRYPTO_ARBITRAGE_LIVE_CONFIRMATION === 'I_ACCEPT_LIVE_ORDER_RISK',
+    zeroCapitalExecutionEnabled: process.env.ZERO_CAPITAL_ENABLE_EXECUTION === 'true',
+    zeroCapitalExecutionConfirmed: process.env.ZERO_CAPITAL_EXECUTION_CONFIRMATION === 'I_ACCEPT_ZERO_CAPITAL_EXECUTION_RISK',
+    walletConfigured: !!process.env.WALLET_PRIVATE_KEY?.trim(),
+    coinbaseConfigured,
+    krakenConfigured: !!(process.env.KRAKEN_API_KEY?.trim() && process.env.KRAKEN_API_SECRET?.trim()),
+    okxConfigured: !!(
+      process.env.OKX_API_KEY?.trim()
+      && process.env.OKX_API_SECRET?.trim()
+      && process.env.OKX_API_PASSPHRASE?.trim()
+    ),
+  });
+}
+
+function adoptLegacyProviderAliases(): void {
+  // Paid Alchemy aliases are intentionally not adopted. A stale ALCHEMY_KEY must
+  // not silently recreate an operational Alchemy dependency after the canonical
+  // ALCHEMY_API_KEY has been retired from production.
+  const aliases: Array<{ canonical: string; candidates: string[] }> = [
+    { canonical: 'ZEROX_API_KEY', candidates: ['ZERO_X_API_KEY', 'ZEROX_KEY'] },
+  ];
+
+  for (const { canonical, candidates } of aliases) {
+    if (process.env[canonical]?.trim()) continue;
+    const source = candidates.find(candidate => process.env[candidate]?.trim());
+    if (!source) continue;
+    process.env[canonical] = process.env[source]?.trim();
+    logger.info('[TelemetryBootstrap] Adopted legacy provider environment alias', {
+      component: 'TelemetryBootstrap',
+      canonical,
+      source,
+    });
+  }
+
+  const coinStatsResolution = resolveCoinStatsEnvironment();
+  const adopted = adoptResolvedEnvironmentVariable(coinStatsResolution);
+  logger.info('[TelemetryBootstrap] CoinStats credential resolution', {
+    component: 'TelemetryBootstrap',
+    state: coinStatsResolution.state,
+    configured: coinStatsResolution.state === 'VISIBLE',
+    source: coinStatsResolution.sourceName,
+    adoptedCanonical: adopted,
+    aliasesChecked: coinStatsResolution.aliasesChecked,
+  });
+}
+
+async function registerBestEffortAnkrFallbacks(): Promise<void> {
+  // Anonymous Ankr is best-effort and must be intentionally enabled. When a key
+  // or configured endpoint is present, that authenticated/configured path remains
+  // eligible regardless of this public-fallback switch.
+  const allowAnonymousPublicFallback = process.env.CRYPTOCRAWL_ALLOW_PUBLIC_ANKR_FALLBACK === 'true';
+  const ankrKey = process.env.ANKR_API_KEY?.trim() || process.env.ANKR_KEY?.trim();
+  const outcomes = await Promise.all(TELEMETRY_CHAINS.map(async chain => {
+    const keyDerived = ankrKey && ANKR_SLUGS[chain]
+      ? `https://rpc.ankr.com/${ANKR_SLUGS[chain]}/${ankrKey}`
+      : undefined;
+    const configured = process.env[`${chain.toUpperCase()}_ANKR_RPC_URL`]?.trim()
+      || process.env[`ANKR_${chain.toUpperCase()}_RPC_URL`]?.trim()
+      || (chain === 'ethereum' ? process.env.ANKR_RPC_URL?.trim() : undefined)
+      || keyDerived;
+    const admission = admitAnkrFallback({
+      configuredUrl: configured,
+      publicUrl: ANKR_PUBLIC_HTTP[chain],
+      allowAnonymousPublicFallback,
+    });
+    if (!admission) {
+      return {
+        chain,
+        provider: null,
+        healthy: false,
+        skipped: true,
+        detail: 'Ankr recovery path explicitly disabled and no configured/key-derived endpoint is available',
+      };
+    }
+
+    try {
+      await multiProviderRpcManager.registerProvider({
+        provider: admission.provider,
+        chain,
+        httpUrl: admission.httpUrl,
+        priority: admission.priority,
+        capabilities: [
+          'json_rpc',
+          'network',
+          'blocks',
+          'transactions',
+          'receipts',
+          'gas',
+          'logs',
+          'contract_calls',
+        ],
+      });
+      const health = multiProviderRpcManager.getHealth(chain)
+        .find(observation => observation.provider === admission.provider);
+      return {
+        chain,
+        provider: admission.provider,
+        healthy: health?.http.success === true,
+        skipped: false,
+        detail: health?.http.lastError || health?.http.state || 'registered',
+      };
+    } catch (error) {
+      return {
+        chain,
+        provider: admission.provider,
+        healthy: false,
+        skipped: false,
+        detail: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }));
+
+  logger.info('[TelemetryBootstrap] Ankr fallback admission completed', {
+    component: 'TelemetryBootstrap',
+    authenticatedKeyVisible: Boolean(ankrKey),
+    anonymousPublicFallbackEnabled: allowAnonymousPublicFallback,
+    healthyChains: outcomes.filter(outcome => outcome.healthy).map(outcome => outcome.chain),
+    skippedChains: outcomes.filter(outcome => outcome.skipped).map(outcome => outcome.chain),
+    unavailableChains: outcomes.filter(outcome => !outcome.healthy && !outcome.skipped).map(outcome => ({
+      chain: outcome.chain,
+      provider: outcome.provider,
+      detail: outcome.detail,
+    })),
+  });
+}
+
+async function startFreeProviderTelemetry(): Promise<void> {
+  const guard = captureCryptoCrawlerWorkGuard();
+  guard();
+  await ensureDynamicRpcProviderWiring();
+  guard();
+  ensureProviderMeshPendingStream();
+  const healthyProviders = TELEMETRY_CHAINS.flatMap(chain =>
+    multiProviderRpcManager.getHealth(chain)
+      .filter(observation => observation.http.success)
+      .map(observation => `${chain}:${observation.provider}`),
+  );
+  logger.info('[TelemetryBootstrap] Free/configured provider telemetry initialized', {
+    component: 'TelemetryBootstrap',
+    healthyProviders,
+    alchemyOperationalAuthority: false,
+    alchemyPaidMempoolAuthority: false,
+    alchemyGasSponsorshipAuthority: false,
+    providerManagerAuthoritative: true,
+  });
+}
+
+async function probeReadOnlyZeroX(): Promise<void> {
+  if (!process.env.ZEROX_API_KEY?.trim()) return;
+  const polygon = SUPPORTED_CHAINS.polygon;
+  try {
+    const observation = await marketDataProviders.getDexQuote({
+      chainId: polygon.chainId,
+      sellToken: polygon.usdc,
+      buyToken: polygon.usdt,
+      sellAmount: '1000000',
+    });
+    logger.info('[TelemetryBootstrap] 0x read-only price probe completed', {
+      component: 'TelemetryBootstrap',
+      available: !!observation,
+      chainId: polygon.chainId,
+      quoteKind: observation?.quoteKind ?? null,
+      executable: observation?.executable ?? false,
+      liquidityAvailable: observation?.liquidityAvailable ?? false,
+    });
+  } catch (error) {
+    logger.warn('[TelemetryBootstrap] 0x read-only price probe degraded', {
+      component: 'TelemetryBootstrap',
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function probeMarketUniverseProviders(): Promise<void> {
+  try {
+    const universe = await marketDataProviders.discoverUniverse();
+    logger.info('[TelemetryBootstrap] Market-universe provider probe completed', {
+      component: 'TelemetryBootstrap',
+      assets: universe.length,
+      providers: marketDataProviders.getProviderStatuses().map(status => ({
+        provider: status.provider,
+        state: status.state,
+        observedAt: status.observedAt,
+        detail: status.detail,
+      })),
+    });
+  } catch (error) {
+    logger.warn('[TelemetryBootstrap] Market-universe provider probe degraded', {
+      component: 'TelemetryBootstrap',
+      error: error instanceof Error ? error.message : String(error),
+      providers: marketDataProviders.getProviderStatuses().map(status => ({
+        provider: status.provider,
+        state: status.state,
+        detail: status.detail,
+      })),
+    });
+  }
+}
+
+export function ensureTelemetryBootstrap(): Promise<void> {
+  captureCryptoCrawlerWorkGuard()();
+  if (!bootstrapPromise) {
+    const generation = ++bootstrapGeneration;
+    adoptLegacyProviderAliases();
+    logExecutionPosture();
+    logger.info('[TelemetryBootstrap] Runtime identity', {
+      component: 'TelemetryBootstrap',
+      ...getCryptoCrawlerRuntimeAttestation(),
+    });
+    bootstrapPromise = (async () => {
+      // Telemetry is subordinate to explicit master activation. It never starts
+      // the canonical discovery/execution core on its own.
+      await multiProviderRpcManager.initialize(TELEMETRY_CHAINS);
+      if (generation !== bootstrapGeneration) return;
+      await registerBestEffortAnkrFallbacks();
+      if (generation !== bootstrapGeneration) return;
+      await startFreeProviderTelemetry();
+      if (generation !== bootstrapGeneration) return;
+      await probeReadOnlyZeroX();
+      if (generation !== bootstrapGeneration) return;
+      await probeMarketUniverseProviders();
+      if (generation !== bootstrapGeneration) return;
+
+      const healthyProviders = TELEMETRY_CHAINS.flatMap(chain =>
+        multiProviderRpcManager.getHealth(chain)
+          .filter(observation => observation.http.success)
+          .map(observation => `${chain}:${observation.provider}`),
+      );
+
+      logger.info('[TelemetryBootstrap] Optional blockchain telemetry ready', {
+        component: 'TelemetryBootstrap',
+        healthyProviders,
+        alchemyOperationalAuthority: false,
+        core: getCryptoCrawlerCoreRuntimeStatus(),
+        marketDataProviders: marketDataProviders.getProviderStatuses().map(status => ({
+          provider: status.provider,
+          state: status.state,
+          detail: status.detail,
+        })),
+      });
+    })().catch(error => {
+      logger.warn('[TelemetryBootstrap] Optional blockchain telemetry bootstrap degraded; canonical CEX core remains independent', {
+        component: 'TelemetryBootstrap',
+        coreStarted: getCryptoCrawlerCoreRuntimeStatus().started,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+
+  return bootstrapPromise;
+}
+
+export async function stopTelemetryBootstrap(): Promise<void> {
+  bootstrapGeneration += 1;
+  bootstrapPromise = null;
+  await providerMeshPendingStream.stop();
+}

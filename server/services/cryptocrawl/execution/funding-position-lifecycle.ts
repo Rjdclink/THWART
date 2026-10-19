@@ -1,0 +1,532 @@
+import { randomUUID } from 'node:crypto';
+import { isDatabaseConfigured, pool } from '../../../db.js';
+import logger from '../../../logger.js';
+import { getCryptocrawlGovernance } from '../governance/index.js';
+
+export interface FundingExecutionPlan {
+  opportunityId: string;
+  venue: 'okx' | 'kraken' | 'kalshi_perps';
+  symbol: string;
+  notionalUsd: number;
+  /** Expected-value carry at entry. This is not canonical deterministic profit. */
+  expectedNetProfitUsd: number;
+  expectedEntryCostUsd: number;
+  expectedExitCostUsd: number;
+  expectedFundingUsd: number;
+  marginBufferUsd: number;
+  fundingTimestamp: number;
+  expiresAt: number;
+  provenance: string[];
+}
+
+export interface FundingOpenReceipt {
+  lifecycleId: string;
+  spotOrderId: string;
+  perpOrderId: string;
+  openedAt: number;
+  entrySubmittedAt?: number;
+  deltaNeutral: boolean;
+  measuredSpotQuantity: number;
+  measuredPerpQuantity: number;
+  /** True only after exact spot-entry ownership and the acquired-base hold exist. */
+  entryOwnershipConfirmed?: boolean;
+  marginReservationId?: string;
+  spotEntryReservationId?: string | null;
+  baseReservationId?: string | null;
+  /** Backward-compatible reservation list for already-persisted lifecycle rows. */
+  capitalReservationIds?: string[];
+}
+
+export interface FundingTerminalSettlement {
+  lifecycleId: string;
+  terminal: boolean;
+  settlementConfirmed: boolean;
+  spotClosed: boolean;
+  perpClosed: boolean;
+  spotCloseOrderId?: string;
+  perpCloseOrderId?: string;
+  fundingPaymentUsd: number | null;
+  realizedEntryExitPnlUsd: number | null;
+  realizedFeesUsd: number | null;
+  realizedNetProfitUsd: number | null;
+  settledAt: number | null;
+  provenance: string[];
+  error?: string;
+}
+
+export interface FundingOpeningRecoveryResult {
+  status: 'pending' | 'opened' | 'failed';
+  receipt?: FundingOpenReceipt;
+  error?: string;
+}
+
+export interface FundingLifecycleAdapter {
+  venue: FundingExecutionPlan['venue'];
+  verifyCurrentPlan(plan: FundingExecutionPlan): Promise<boolean>;
+  openDeltaNeutral(plan: FundingExecutionPlan, lifecycleId: string): Promise<FundingOpenReceipt>;
+  /** Recover deterministic client-order IDs after a crash during entry submission. */
+  recoverOpening?(plan: FundingExecutionPlan, lifecycleId: string): Promise<FundingOpeningRecoveryResult>;
+  /** Retry exact ownership bookkeeping after real entry fills have already become durable. */
+  reconcileOpenReceipt?(plan: FundingExecutionPlan, receipt: FundingOpenReceipt): Promise<FundingOpenReceipt>;
+  marginHealthy(receipt: FundingOpenReceipt): Promise<boolean>;
+  closeAndSettle(plan: FundingExecutionPlan, receipt: FundingOpenReceipt): Promise<FundingTerminalSettlement>;
+  /** Reconcile an already-closed pair when exchange funding/bill/accounting evidence lagged. */
+  reconcileSettlement?(
+    plan: FundingExecutionPlan,
+    receipt: FundingOpenReceipt,
+    prior: FundingTerminalSettlement,
+  ): Promise<FundingTerminalSettlement>;
+}
+
+export interface FundingLifecycleResult {
+  success: boolean;
+  settlementConfirmed: boolean;
+  status: 'rejected' | 'opening' | 'opened' | 'closed' | 'failed' | 'settlement_unknown';
+  lifecycleId?: string;
+  settlement?: FundingTerminalSettlement;
+  error?: string;
+}
+
+type StoredLifecycle = {
+  lifecycleId: string;
+  plan: FundingExecutionPlan;
+  status: string;
+  receipt: FundingOpenReceipt | null;
+  settlement: FundingTerminalSettlement | null;
+  lastError: string | null;
+};
+
+const TABLE = 'private.cryptocrawler_funding_lifecycles';
+
+function bounded(raw: unknown, fallback: number, min: number, max: number): number {
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? Math.max(min, Math.min(max, Math.trunc(parsed))) : fallback;
+}
+
+function fundingStoreReadyTtlMs(): number {
+  return bounded(process.env.CRYPTOCRAWL_FUNDING_TABLE_READY_TTL_MS, 300_000, 30_000, 900_000);
+}
+
+function parseJson<T>(raw: unknown): T | null {
+  if (!raw) return null;
+  if (typeof raw === 'object') return raw as T;
+  try { return JSON.parse(String(raw)) as T; } catch { return null; }
+}
+
+class FundingPositionLifecycle {
+  private readonly adapters = new Map<FundingExecutionPlan['venue'], FundingLifecycleAdapter>();
+  private tableProbeInFlight: Promise<boolean> | null = null;
+  private tableReadyUntil = 0;
+  private tableRetryAfter = 0;
+  private advancing = new Set<string>();
+
+  registerAdapter(adapter: FundingLifecycleAdapter): void {
+    this.adapters.set(adapter.venue, adapter);
+  }
+
+  getRegisteredVenues(): FundingExecutionPlan['venue'][] {
+    return [...this.adapters.keys()];
+  }
+
+  private async ensureAdapter(venue: FundingExecutionPlan['venue']): Promise<FundingLifecycleAdapter | null> {
+    const existing = this.adapters.get(venue);
+    if (existing) return existing;
+    if (venue === 'okx') {
+      try {
+        const module = await import('./okx-funding-lifecycle-adapter.js');
+        module.ensureOkxFundingLifecycleAdapterRegistered();
+      } catch (error) {
+        logger.error('[FundingLifecycle] OKX adapter recovery registration failed closed', {
+          component: 'FundingPositionLifecycle',
+          venue,
+          error: error instanceof Error ? error.message : String(error),
+          executionAuthorityGranted: false,
+        });
+      }
+    } else if (venue === 'kalshi_perps') {
+      try {
+        const module = await import('./kalshi-funding-lifecycle-adapter.js');
+        module.ensureKalshiFundingLifecycleAdapterRegistered();
+      } catch (error) {
+        logger.error('[FundingLifecycle] Kalshi adapter recovery registration failed closed', {
+          component: 'FundingPositionLifecycle',
+          venue,
+          error: error instanceof Error ? error.message : String(error),
+          executionAuthorityGranted: false,
+          systemOwnedCapitalRequirementChanged: false,
+        });
+      }
+    }
+    return this.adapters.get(venue) ?? null;
+  }
+
+  /** Reuse startup's exact schema proof instead of paying another readiness query. */
+  primeStoreReady(ttlMs = fundingStoreReadyTtlMs()): void {
+    const boundedTtlMs = bounded(ttlMs, fundingStoreReadyTtlMs(), 30_000, 900_000);
+    this.tableReadyUntil = Math.max(this.tableReadyUntil, Date.now() + boundedTtlMs);
+    this.tableRetryAfter = 0;
+  }
+
+  private validOpenReceipt(receipt: FundingOpenReceipt | null): receipt is FundingOpenReceipt {
+    return !!receipt
+      && receipt.deltaNeutral === true
+      && receipt.measuredSpotQuantity > 0
+      && receipt.measuredPerpQuantity > 0
+      && Boolean(receipt.spotOrderId)
+      && Boolean(receipt.perpOrderId);
+  }
+
+  private async reconcileOpenAccounting(
+    adapter: FundingLifecycleAdapter,
+    plan: FundingExecutionPlan,
+    lifecycleId: string,
+    status: string,
+    receipt: FundingOpenReceipt,
+  ): Promise<{ receipt: FundingOpenReceipt; error: string | null }> {
+    if (receipt.entryOwnershipConfirmed === true || !adapter.reconcileOpenReceipt) {
+      return { receipt, error: null };
+    }
+    try {
+      const reconciled = await adapter.reconcileOpenReceipt(plan, receipt);
+      await this.persist(lifecycleId, plan, status, null, reconciled);
+      return { receipt: reconciled, error: null };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.persist(lifecycleId, plan, status, `FUNDING_ENTRY_ACCOUNTING_PENDING:${message}`, receipt);
+      logger.warn('[FundingLifecycle] Entry fills are durable while exact ownership reconciliation remains pending', {
+        component: 'FundingPositionLifecycle', lifecycleId, venue: plan.venue, symbol: plan.symbol,
+        error: message, livePositionForgotten: false, capitalReleased: false,
+      });
+      return { receipt, error: 'FUNDING_ENTRY_ACCOUNTING_PENDING' };
+    }
+  }
+
+  /**
+   * Open a funding lifecycle and return immediately after terminal entry fills are
+   * proven delta-neutral. Exchange reality is persisted before ownership
+   * reconciliation, so a transient accounting failure can never erase a live
+   * position. Holding/margin monitoring/close settlement is advanced by later
+   * canonical scheduler ticks via advanceOpenLifecycles().
+   */
+  async execute(plan: FundingExecutionPlan): Promise<FundingLifecycleResult> {
+    const rejection = this.validate(plan);
+    if (rejection) return { success: false, settlementConfirmed: false, status: 'rejected', error: rejection };
+    const adapter = await this.ensureAdapter(plan.venue);
+    if (!adapter) return { success: false, settlementConfirmed: false, status: 'rejected', error: 'REJECT_FUNDING_LIFECYCLE_ADAPTER_UNAVAILABLE' };
+    if (!await adapter.verifyCurrentPlan(plan)) {
+      return { success: false, settlementConfirmed: false, status: 'rejected', error: 'REJECT_FUNDING_PLAN_NO_LONGER_CURRENT' };
+    }
+
+    getCryptocrawlGovernance().requireAllowed('SUBMIT_TX', { chain: `cex:${plan.venue}` });
+    if (!await this.ensureStore()) {
+      return { success: false, settlementConfirmed: false, status: 'rejected', error: 'REJECT_FUNDING_LIFECYCLE_STORE_UNAVAILABLE' };
+    }
+
+    const lifecycleId = `funding:${randomUUID()}`;
+    const inserted = await this.insertOpeningIfAbsent(lifecycleId, plan);
+    if (!inserted) {
+      const existing = await this.findActiveByOpportunity(plan.opportunityId);
+      if (existing) {
+        return {
+          success: existing.status === 'open',
+          settlementConfirmed: false,
+          status: existing.status === 'failed' ? 'failed' : existing.status === 'opening' ? 'opening' : 'opened',
+          lifecycleId: existing.lifecycleId,
+          error: existing.status === 'open' ? undefined : 'FUNDING_OPPORTUNITY_ALREADY_ACTIVE',
+        };
+      }
+      return { success: false, settlementConfirmed: false, status: 'rejected', error: 'FUNDING_OPPORTUNITY_ALREADY_ACTIVE' };
+    }
+
+    let receipt: FundingOpenReceipt;
+    try {
+      receipt = await adapter.openDeltaNeutral(plan, lifecycleId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.persist(lifecycleId, plan, 'opening', message);
+      return { success: false, settlementConfirmed: false, status: 'opening', lifecycleId, error: 'FUNDING_OPEN_RECOVERY_REQUIRED' };
+    }
+    if (!this.validOpenReceipt(receipt)) {
+      await this.persist(lifecycleId, plan, 'opening', 'entry legs are not yet proven delta-neutral', receipt);
+      return { success: false, settlementConfirmed: false, status: 'opening', lifecycleId, error: 'FUNDING_DELTA_NEUTRALITY_UNPROVEN' };
+    }
+
+    await this.persist(lifecycleId, plan, 'open', null, receipt);
+    const accounting = await this.reconcileOpenAccounting(adapter, plan, lifecycleId, 'open', receipt);
+    receipt = accounting.receipt;
+    logger.info('[FundingLifecycle] Delta-neutral position opened; lifecycle delegated to scheduler ticks', {
+      component: 'FundingPositionLifecycle', lifecycleId, venue: plan.venue, symbol: plan.symbol,
+      fundingTimestamp: plan.fundingTimestamp, blockingWait: false, durableState: true,
+      entryOwnershipConfirmed: receipt.entryOwnershipConfirmed === true,
+      expectedProfitAuthority: 'projected_carry_not_deterministic_profit',
+    });
+    return { success: true, settlementConfirmed: false, status: 'opened', lifecycleId, error: accounting.error || undefined };
+  }
+
+  async advanceOpenLifecycles(limit = 4): Promise<FundingLifecycleResult[]> {
+    if (!await this.ensureStore()) return [];
+    const rows = await pool.query(
+      `SELECT lifecycle_id, plan, status, open_receipt, terminal_settlement, last_error
+       FROM ${TABLE}
+       WHERE status IN ('opening','open','closing','settlement_unknown')
+       ORDER BY updated_at ASC
+       LIMIT $1`,
+      [bounded(limit, 4, 1, 32)],
+    );
+    const results: FundingLifecycleResult[] = [];
+    for (const row of rows.rows) {
+      const lifecycleId = String(row.lifecycle_id || '');
+      if (!lifecycleId || this.advancing.has(lifecycleId)) continue;
+      this.advancing.add(lifecycleId);
+      try {
+        const plan = parseJson<FundingExecutionPlan>(row.plan);
+        if (!plan) {
+          results.push({ success: false, settlementConfirmed: false, status: 'settlement_unknown', lifecycleId, error: 'FUNDING_DURABLE_PLAN_INVALID' });
+          continue;
+        }
+        const result = await this.advanceStored({
+          lifecycleId,
+          plan,
+          status: String(row.status || ''),
+          receipt: parseJson<FundingOpenReceipt>(row.open_receipt),
+          settlement: parseJson<FundingTerminalSettlement>(row.terminal_settlement),
+          lastError: row.last_error ? String(row.last_error) : null,
+        });
+        results.push(result);
+      } finally {
+        this.advancing.delete(lifecycleId);
+      }
+    }
+    return results;
+  }
+
+  private settlementComplete(settlement: FundingTerminalSettlement): boolean {
+    return settlement.terminal
+      && settlement.settlementConfirmed
+      && settlement.spotClosed
+      && settlement.perpClosed
+      && settlement.fundingPaymentUsd !== null
+      && Number.isFinite(settlement.fundingPaymentUsd)
+      && settlement.realizedEntryExitPnlUsd !== null
+      && Number.isFinite(settlement.realizedEntryExitPnlUsd)
+      && settlement.realizedFeesUsd !== null
+      && Number.isFinite(settlement.realizedFeesUsd)
+      && settlement.realizedNetProfitUsd !== null
+      && Number.isFinite(settlement.realizedNetProfitUsd);
+  }
+
+  private async finalizeSettlement(
+    lifecycleId: string,
+    plan: FundingExecutionPlan,
+    receipt: FundingOpenReceipt,
+    settlement: FundingTerminalSettlement,
+    closeReason: string,
+  ): Promise<FundingLifecycleResult> {
+    const confirmed = this.settlementComplete(settlement);
+    await this.persist(lifecycleId, plan, confirmed ? 'closed' : 'settlement_unknown', settlement.error || null, receipt, settlement);
+    logger.info('[FundingLifecycle] Terminal funding lifecycle result', {
+      component: 'FundingPositionLifecycle', lifecycleId, venue: plan.venue, symbol: plan.symbol,
+      closeReason, settlementConfirmed: confirmed, realizedNetProfitUsd: settlement.realizedNetProfitUsd,
+      pairAlreadyClosed: settlement.spotClosed && settlement.perpClosed,
+    });
+    return {
+      success: confirmed && (settlement.realizedNetProfitUsd ?? Number.NEGATIVE_INFINITY) > 0,
+      settlementConfirmed: confirmed,
+      status: confirmed ? 'closed' : 'settlement_unknown',
+      lifecycleId,
+      settlement,
+      error: confirmed ? undefined : settlement.error || 'FUNDING_TERMINAL_SETTLEMENT_INCOMPLETE',
+    };
+  }
+
+  private async advanceStored(stored: StoredLifecycle): Promise<FundingLifecycleResult> {
+    const { lifecycleId, plan } = stored;
+    const adapter = await this.ensureAdapter(plan.venue);
+    if (!adapter) {
+      return { success: false, settlementConfirmed: false, status: 'settlement_unknown', lifecycleId, error: 'FUNDING_LIFECYCLE_ADAPTER_UNAVAILABLE' };
+    }
+
+    let receipt = stored.receipt;
+    let activeStatus = stored.status;
+    if (activeStatus === 'opening' && !this.validOpenReceipt(receipt)) {
+      if (!adapter.recoverOpening) {
+        return { success: false, settlementConfirmed: false, status: 'opening', lifecycleId, error: 'FUNDING_OPENING_RECOVERY_UNAVAILABLE' };
+      }
+      try {
+        const recovered = await adapter.recoverOpening(plan, lifecycleId);
+        if (recovered.status === 'pending') {
+          await this.persist(lifecycleId, plan, 'opening', recovered.error || 'FUNDING_OPENING_RECOVERY_PENDING', recovered.receipt);
+          return { success: false, settlementConfirmed: false, status: 'opening', lifecycleId, error: recovered.error || 'FUNDING_OPENING_RECOVERY_PENDING' };
+        }
+        if (recovered.status === 'failed' || !this.validOpenReceipt(recovered.receipt ?? null)) {
+          await this.persist(lifecycleId, plan, 'failed', recovered.error || 'FUNDING_OPENING_RECOVERY_FAILED', recovered.receipt);
+          return { success: false, settlementConfirmed: false, status: 'failed', lifecycleId, error: recovered.error || 'FUNDING_OPENING_RECOVERY_FAILED' };
+        }
+        receipt = recovered.receipt!;
+        activeStatus = 'open';
+        await this.persist(lifecycleId, plan, 'open', null, receipt);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await this.persist(lifecycleId, plan, 'opening', message, receipt ?? undefined);
+        return { success: false, settlementConfirmed: false, status: 'opening', lifecycleId, error: 'FUNDING_OPENING_RECOVERY_PENDING' };
+      }
+    }
+
+    if (!this.validOpenReceipt(receipt)) {
+      return { success: false, settlementConfirmed: false, status: 'settlement_unknown', lifecycleId, error: 'FUNDING_DURABLE_STATE_INCOMPLETE' };
+    }
+
+    if (
+      activeStatus === 'settlement_unknown'
+      && stored.settlement?.spotClosed === true
+      && stored.settlement?.perpClosed === true
+    ) {
+      if (!adapter.reconcileSettlement) {
+        return { success: false, settlementConfirmed: false, status: 'settlement_unknown', lifecycleId, settlement: stored.settlement, error: 'FUNDING_SETTLEMENT_RECONCILER_UNAVAILABLE' };
+      }
+      try {
+        const reconciled = await adapter.reconcileSettlement(plan, receipt, stored.settlement);
+        return this.finalizeSettlement(lifecycleId, plan, receipt, reconciled, 'post_close_evidence_reconciliation');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await this.persist(lifecycleId, plan, 'settlement_unknown', message, receipt, stored.settlement);
+        return { success: false, settlementConfirmed: false, status: 'settlement_unknown', lifecycleId, settlement: stored.settlement, error: 'FUNDING_POST_CLOSE_RECONCILIATION_FAILED' };
+      }
+    }
+
+    const accounting = await this.reconcileOpenAccounting(adapter, plan, lifecycleId, activeStatus, receipt);
+    receipt = accounting.receipt;
+
+    const maxHoldMs = bounded(process.env.CRYPTOCRAWL_FUNDING_MAX_HOLD_MS, 8 * 60 * 60_000, 60_000, 24 * 60 * 60_000);
+    const postPaymentHoldMs = bounded(process.env.CRYPTOCRAWL_FUNDING_POST_PAYMENT_HOLD_MS, 30_000, 0, 5 * 60_000);
+    const normalCloseAt = Math.min(plan.fundingTimestamp + postPaymentHoldMs, receipt.openedAt + maxHoldMs);
+    const closeRecoveryRequired = activeStatus === 'closing' || activeStatus === 'settlement_unknown';
+    const healthy = closeRecoveryRequired ? false : await adapter.marginHealthy(receipt).catch(() => false);
+    if (!closeRecoveryRequired && healthy && Date.now() < normalCloseAt) {
+      return { success: true, settlementConfirmed: false, status: 'opened', lifecycleId, error: accounting.error || undefined };
+    }
+
+    const closeReason = closeRecoveryRequired
+      ? 'close_or_settlement_recovery'
+      : healthy ? 'funding_window_complete' : 'margin_or_carry_health_exit';
+    await this.persist(lifecycleId, plan, 'closing', closeReason, receipt, stored.settlement ?? undefined);
+    let settlement: FundingTerminalSettlement;
+    try {
+      settlement = await adapter.closeAndSettle(plan, receipt);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.persist(lifecycleId, plan, 'closing', message, receipt, stored.settlement ?? undefined);
+      return { success: false, settlementConfirmed: false, status: 'settlement_unknown', lifecycleId, error: 'FUNDING_CLOSE_RECOVERY_REQUIRED' };
+    }
+    return this.finalizeSettlement(lifecycleId, plan, receipt, settlement, closeReason);
+  }
+
+  private validate(plan: FundingExecutionPlan): string | null {
+    if (!['okx', 'kraken', 'kalshi_perps'].includes(String(plan.venue))) return 'REJECT_FUNDING_VENUE';
+    if (!(plan.notionalUsd > 0) || !Number.isFinite(plan.notionalUsd)) return 'REJECT_FUNDING_NOTIONAL';
+    if (!(plan.expectedNetProfitUsd > 0) || !Number.isFinite(plan.expectedNetProfitUsd)) return 'REJECT_FUNDING_NONPOSITIVE_PROJECTED_NET';
+    if (![plan.expectedEntryCostUsd, plan.expectedExitCostUsd, plan.expectedFundingUsd, plan.marginBufferUsd].every(Number.isFinite)) return 'REJECT_FUNDING_ECONOMICS_INCOMPLETE';
+    if (!(plan.marginBufferUsd > 0)) return 'REJECT_FUNDING_MARGIN_BUFFER';
+    if (!Number.isFinite(plan.fundingTimestamp) || plan.fundingTimestamp <= Date.now()) return 'REJECT_FUNDING_TIMESTAMP';
+    if (!Number.isFinite(plan.expiresAt) || plan.expiresAt <= Date.now() || plan.expiresAt >= plan.fundingTimestamp) return 'REJECT_FUNDING_EXPIRED';
+    return null;
+  }
+
+  private async ensureStore(): Promise<boolean> {
+    if (!isDatabaseConfigured) return false;
+    const now = Date.now();
+    if (this.tableReadyUntil > now) return true;
+    if (now < this.tableRetryAfter) return false;
+    if (this.tableProbeInFlight) return this.tableProbeInFlight;
+    const readyTtlMs = fundingStoreReadyTtlMs();
+    const retryMs = bounded(process.env.CRYPTOCRAWL_FUNDING_TABLE_RETRY_MS, 5_000, 1_000, 60_000);
+    const probe = pool.query(`SELECT to_regclass('${TABLE}') IS NOT NULL AS ready`)
+      .then(result => {
+        const ready = result.rows?.[0]?.ready === true;
+        if (ready) {
+          this.tableReadyUntil = Date.now() + readyTtlMs;
+          this.tableRetryAfter = 0;
+        } else {
+          this.tableReadyUntil = 0;
+          this.tableRetryAfter = Date.now() + retryMs;
+          logger.error('[FundingLifecycle] Migration-owned lifecycle table is missing', {
+            component: 'FundingPositionLifecycle', table: TABLE, runtimeDdlAllowed: false, executionAuthorityGranted: false,
+          });
+        }
+        return ready;
+      })
+      .catch(error => {
+        this.tableReadyUntil = 0;
+        this.tableRetryAfter = Date.now() + retryMs;
+        logger.warn('[FundingLifecycle] Lifecycle-store verification failed closed', {
+          component: 'FundingPositionLifecycle', retryAfterMs: retryMs,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return false;
+      })
+      .finally(() => {
+        if (this.tableProbeInFlight === probe) this.tableProbeInFlight = null;
+      });
+    this.tableProbeInFlight = probe;
+    return probe;
+  }
+
+  private async insertOpeningIfAbsent(lifecycleId: string, plan: FundingExecutionPlan): Promise<boolean> {
+    const result = await pool.query(
+      `INSERT INTO ${TABLE}
+        (lifecycle_id, opportunity_id, venue, symbol, status, expected_net_profit_usd, plan, last_error, updated_at)
+       VALUES ($1,$2,$3,$4,'opening',$5,$6::jsonb,NULL,now())
+       ON CONFLICT DO NOTHING
+       RETURNING lifecycle_id`,
+      [lifecycleId, plan.opportunityId, plan.venue, plan.symbol, plan.expectedNetProfitUsd, JSON.stringify(plan)],
+    );
+    return result.rowCount === 1;
+  }
+
+  private async findActiveByOpportunity(opportunityId: string): Promise<StoredLifecycle | null> {
+    const result = await pool.query(
+      `SELECT lifecycle_id, plan, status, open_receipt, terminal_settlement, last_error
+       FROM ${TABLE}
+       WHERE opportunity_id = $1 AND status IN ('opening','open','closing','settlement_unknown')
+       ORDER BY updated_at DESC LIMIT 1`,
+      [opportunityId],
+    );
+    const row = result.rows?.[0];
+    if (!row) return null;
+    const plan = parseJson<FundingExecutionPlan>(row.plan);
+    if (!plan) return null;
+    return {
+      lifecycleId: String(row.lifecycle_id), plan, status: String(row.status),
+      receipt: parseJson<FundingOpenReceipt>(row.open_receipt),
+      settlement: parseJson<FundingTerminalSettlement>(row.terminal_settlement),
+      lastError: row.last_error ? String(row.last_error) : null,
+    };
+  }
+
+  private async persist(
+    lifecycleId: string,
+    plan: FundingExecutionPlan,
+    status: string,
+    error: string | null,
+    receipt?: FundingOpenReceipt,
+    settlement?: FundingTerminalSettlement,
+  ): Promise<void> {
+    await pool.query(`INSERT INTO ${TABLE}
+      (lifecycle_id, opportunity_id, venue, symbol, status, expected_net_profit_usd, plan, open_receipt, terminal_settlement, last_error, updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,now())
+      ON CONFLICT (lifecycle_id) DO UPDATE SET status=EXCLUDED.status, open_receipt=EXCLUDED.open_receipt,
+        terminal_settlement=COALESCE(EXCLUDED.terminal_settlement,${TABLE}.terminal_settlement), last_error=EXCLUDED.last_error, updated_at=now()`, [
+      lifecycleId, plan.opportunityId, plan.venue, plan.symbol, status, plan.expectedNetProfitUsd,
+      JSON.stringify(plan), receipt ? JSON.stringify(receipt) : null, settlement ? JSON.stringify(settlement) : null, error,
+    ]);
+  }
+}
+
+const fundingPositionLifecycleSingleton = new FundingPositionLifecycle();
+
+/** Startup migration verification already proved this exact table exists. */
+export function primeFundingLifecycleStoreReady(ttlMs = fundingStoreReadyTtlMs()): void {
+  fundingPositionLifecycleSingleton.primeStoreReady(ttlMs);
+}
+
+export const fundingPositionLifecycle = fundingPositionLifecycleSingleton;
