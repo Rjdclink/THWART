@@ -1,0 +1,121 @@
+const fs = require('fs');
+const path = require('path');
+
+const root = path.resolve(__dirname, '../..');
+const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf8');
+const assertContains = (source, pattern, description) => {
+  if (!source.includes(pattern)) throw new Error(`Missing invariant: ${description}`);
+};
+const assertNotContains = (source, pattern, description) => {
+  if (source.includes(pattern)) throw new Error(`Unsafe invariant: ${description}`);
+};
+const assertBefore = (source, firstPattern, secondPattern, description) => {
+  if (source.indexOf(firstPattern) < 0 || source.indexOf(secondPattern) < 0 || source.indexOf(firstPattern) >= source.indexOf(secondPattern)) {
+    throw new Error(`Ordering invariant failed: ${description}`);
+  }
+};
+
+const cryptara = read('server/services/cryptara/index.ts');
+const graph = read('server/services/cryptocrawl/discovery/opportunity-graph.ts');
+const faucet = read('server/services/cryptocrawl/faucet/autonomous-faucet.ts');
+const execution = read('server/services/cryptocrawl/execution/index.ts');
+const progression = read('server/services/cryptocrawl/governance/automatic-stage-progression.ts');
+const riskGovernor = read('server/services/cryptocrawl/governance/risk-governor.ts');
+const cryptaraGovernance = read('server/services/cryptocrawl/governance/cryptara-integration.ts');
+const stageManagement = read('server/services/cryptocrawl/governance/stage-management.ts');
+const masterPipeline = read('server/services/cryptocrawl/integration/master-pipeline.ts');
+const tradingView = read('server/services/cryptocrawl/babel/tradingview-integration.ts');
+const legacy = read('server/cryptaraModule.ts');
+const hyperMonteCarlo = read('server/services/cryptocrawl/validation/monte-carlo-hyper-engine.ts');
+const runtimeConfidenceBootstrap = read('server/services/cryptocrawl/validation/runtime-confidence-bootstrap.ts');
+const bootstrapWiring = read('server/services/cryptocrawl/integration/cryptara-bootstrap-wiring.ts');
+const beamWiring = read('server/services/cryptocrawl/integration/cryptara-beam-wiring.ts');
+const assessmentWiring = read('server/services/cryptocrawl/integration/cryptara-assessment-wiring.ts');
+const scheduledTraining = read('server/services/cryptocrawl/training/scheduled-monte-carlo-training.ts');
+const trainingBarrel = read('server/services/cryptocrawl/training/index.ts');
+
+assertContains(cryptara, 'CryptaraOpportunityContext', 'authoritative Cryptara accepts normalized opportunity context');
+assertContains(cryptara, 'recordOpportunityObservation', 'Cryptara records candidate intelligence');
+assertContains(cryptara, 'missingInformation', 'missing information is represented explicitly');
+assertContains(cryptara, 'provenance', 'Cryptara assessments retain provider provenance');
+assertContains(cryptara, 'updatePredictionCalibration', 'execution outcomes calibrate opportunity predictions');
+assertContains(cryptara, 'getPredictionCalibration', 'prediction calibration is observable');
+assertNotContains(cryptara, 'requiresHumanApproval', 'Cryptara does not add a human approval prerequisite');
+
+// Discovery/assessment authority lives in the measured opportunity graph, not the retired faucet state machine.
+assertContains(graph, 'marketDataProviders.discoverUniverse()', 'canonical graph discovers the broadened market universe');
+assertContains(graph, 'arbitrageVerifier.evaluateOnce(', 'canonical graph performs deterministic live verification');
+assertContains(graph, 'const assessment = await cryptara.assessOpportunity({', 'verified positive candidates reach Cryptara');
+assertBefore(graph, 'arbitrageVerifier.evaluateOnce(', 'const assessment = await cryptara.assessOpportunity({', 'deterministic economics precede Cryptara assessment');
+assertContains(graph, "assessment.recommendation === 'consider' && plan.netProfitUsd > 0", 'eligibility requires Cryptara consideration plus positive economics');
+assertContains(graph, "measuredCandidateRegistry.updateStatus(id, 'eligible'", 'canonical graph records eligible status after assessment');
+assertNotContains(faucet, 'marketDataProviders.discoverUniverse()', 'retired faucet cannot own market discovery');
+assertNotContains(faucet, 'cryptara.assessOpportunity(', 'retired faucet cannot own a second Cryptara assessment path');
+
+assertContains(execution, 'recordCryptaraExecutionFeedback({', 'execution outcomes are recorded');
+assertContains(execution, 'normalized?.terminal === true', 'only terminal settlement results enter Cryptara feedback');
+assertContains(execution, 'explicitPayloadRequired: true', 'execution readiness reports the explicit payload requirement');
+assertContains(execution, 'measuredSettlementFeeUsd', 'measured exchange and network costs reach feedback');
+assertContains(progression, 'cryptara.recordExecutionResult(feedback)', 'governance forwards outcomes to authoritative Cryptara');
+assertContains(riskGovernor, 'measuredFeeUSD?: number;', 'governance proposals can carry measured venue fees');
+assertContains(cryptaraGovernance, 'measured venue fee and slippage are required', 'governance execution envelope fails closed without measured costs');
+assertNotContains(cryptaraGovernance, 'const feeBps = 30', 'governance does not fabricate a venue fee');
+assertContains(riskGovernor, 'getLatestMonteCarloEvidence()', 'risk governance consumes canonical Cryptara Monte Carlo evidence');
+assertNotContains(riskGovernor, 'baseSuccessRate: 0.7', 'risk governance does not fabricate a Monte Carlo success rate');
+assertNotContains(riskGovernor, 'MARKET_CONDITIONS.normal', 'risk governance does not force a normal market regime');
+assertContains(stageManagement, 'averageSlippageBps: value.cryptara.averageSlippageBps === null', 'missing slippage remains explicit in persisted evidence');
+assertContains(masterPipeline, 'canonicalExecutionScheduler', 'MasterPipeline compatibility lifecycle delegates to canonical scheduler');
+assertNotContains(masterPipeline, 'LuxSwarm', 'MasterPipeline no longer owns LuxSwarm execution');
+assertNotContains(masterPipeline, 'StealthSuperiority', 'MasterPipeline no longer owns stealth execution');
+assertContains(tradingView, "cached.dataProvenance === 'live' ? 'cached' : 'deterministic-fallback'", 'cached TradingView fallback provenance is preserved');
+assertContains(tradingView, 'TradingView payload contains incomplete indicator data', 'incomplete TradingView data cannot be labeled live');
+
+assertContains(hyperMonteCarlo, "from 'node:worker_threads'", 'Hyper Monte Carlo uses CPU worker threads');
+assertContains(hyperMonteCarlo, 'HyperMonteCarloMode', 'Hyper Monte Carlo exposes live/training modes');
+assertContains(hyperMonteCarlo, 'function wilson', 'adaptive stopping is driven by a statistical confidence interval');
+assertContains(hyperMonteCarlo, 'controlVariateBeta', 'control-variate mean reduction is implemented and observable');
+assertContains(hyperMonteCarlo, 'measuredLatenciesMs', 'measured execution latency feeds the stochastic model');
+assertContains(hyperMonteCarlo, 'measuredSlippageBps', 'measured slippage feeds the stochastic model');
+assertContains(hyperMonteCarlo, 'executionDeadlineMs', 'quote lifetime produces an execution deadline');
+assertContains(hyperMonteCarlo, 'probabilityBothLegsFill', 'joint execution/fill probability is measured');
+assertContains(hyperMonteCarlo, 'stoppedEarly', 'adaptive Monte Carlo can stop before the maximum path budget');
+
+assertContains(runtimeConfidenceBootstrap, 'DEFAULT_RUNTIME_CONFIDENCE_SUCCESS_THRESHOLD = 10', 'runtime confidence requires ten successful trades by default');
+assertContains(runtimeConfidenceBootstrap, 'feedback.settlementConfirmed !== true', 'unconfirmed settlements cannot advance runtime confidence');
+assertContains(runtimeConfidenceBootstrap, 'feedback.realizedProfitUsd <= 0', 'non-profitable outcomes cannot count as successful confidence-bootstrap trades');
+assertContains(runtimeConfidenceBootstrap, 'successfulTradeKeys', 'duplicate settlement feedback cannot advance the bootstrap twice');
+assertContains(runtimeConfidenceBootstrap, "state: confidenceEnabled ? 'calibrated' : 'bootstrap'", 'confidence state is explicit rather than fabricated');
+
+assertContains(bootstrapWiring, 'runHyperMonteCarlo', 'Cryptara production opportunity analysis uses the Hyper Engine');
+assertContains(bootstrapWiring, 'sourceObservedAt', 'Monte Carlo evidence is bound to a unique observation');
+assertContains(bootstrapWiring, 'technicalProvenance: context.tradingView?.dataProvenance', 'technical provenance feeds evidence quality');
+assertNotContains(bootstrapWiring, "missingInformation.push('live_technical_analysis')", 'cached TradingView data is not a binary MC availability gate');
+assertNotContains(bootstrapWiring, 'createMonteCarloEngine(', 'production Cryptara wiring does not run legacy preset simulator');
+assertContains(bootstrapWiring, 'confidenceBootstrap.record(feedback)', 'measured execution advances runtime confidence');
+assertContains(bootstrapWiring, "continuousLearning: 'every_terminal_execution'", 'terminal trade feedback is primary continuous learning path');
+assertContains(bootstrapWiring, "missingInformation.push('runtime_confidence_bootstrap')", 'bootstrap confidence unavailability remains explicit');
+
+assertContains(beamWiring, 'structuredClone(sourceContext)', 'Beam receives a detached immutable opportunity snapshot');
+assertContains(beamWiring, 'context: immutableContext', 'Beam task input carries exact opportunity context');
+assertContains(beamWiring, 'originalRun(workloadInput.context, beamContext.signal)', 'Beam propagates exact snapshot and cancellation');
+assertNotContains(beamWiring, 'return originalRun();', 'Beam does not dereference shared mutable Cryptara context');
+assertNotContains(beamWiring, 'Computational Beam Monte Carlo workload unavailable', 'model failures are not mislabeled as Beam unavailability');
+
+assertContains(assessmentWiring, 'target.latestMonteCarloEvidence = null', 'every market observation clears stale MC evidence first');
+assertContains(assessmentWiring, 'target.runMonteCarloSimulation(context)', 'assessment passes exact opportunity context into Monte Carlo');
+assertContains(assessmentWiring, 'opportunityId}:${context.observedAt}', 'warning state is isolated per observation');
+
+assertContains(riskGovernor, 'const confidencePass = !confidenceEnabled || confidenceScore >= 0.7;', 'Risk Governor bypasses learned confidence only during bootstrap');
+assertContains(riskGovernor, 'if (confidenceEnabled)', 'disabled confidence contributes no artificial risk penalty');
+assertContains(riskGovernor, 'consensus >= 0.7', 'Monte Carlo probability threshold remains active during bootstrap');
+assertContains(riskGovernor, 'evidence!.expectedProfit > 0', 'verified positive economics remain required during bootstrap');
+
+// Legacy preset training may remain available as an explicit file, but not a production namespace/runtime authority.
+assertContains(scheduledTraining, 'createMonteCarloEngine(', 'legacy trainer remains available for explicit research');
+assertContains(scheduledTraining, 'ELITE_STRATEGIES', 'legacy trainer is clearly the preset strategy simulator');
+assertNotContains(trainingBarrel, 'scheduledMonteCarloTraining', 'production training barrel does not export legacy preset trainer');
+
+assertContains(legacy, 'compatibility module', 'legacy neural module is explicitly classified');
+assertContains(legacy, 'used as a second execution or progression authority', 'legacy module cannot claim governance authority');
+
+console.log('Cryptara wiring verification passed.');
