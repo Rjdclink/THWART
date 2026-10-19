@@ -1,0 +1,550 @@
+import type { ZeroCapitalOpportunity } from '../core/zero-capital-engine.js';
+import {
+  buildApeCandidateRescueSnapshots,
+  classifyApeRescueDefect,
+} from './ape-rescue-orchestration.js';
+import { clearsStrictPositiveOutputThreshold } from './zero-capital-profit-output-floor.js';
+
+/**
+ * Resident APE command intelligence. Search priority only: exact economics remain
+ * sovereign. The strict-positive execution threshold never retires optimization.
+ * Candidate ownership/retirement is generation-local, synchronous, in-memory and O(1).
+ */
+export type ApeTactic = 'route_split' | 'single_route_v4' | 'shared_principal_stack';
+export type ApeMeritRank = 0 | 1 | 2 | 3 | 4;
+
+type TacticAggregate = {
+  attempts: number;
+  improvements: number;
+  strictPositiveWins: number;
+  cumulativeImprovementBps: number;
+  cumulativeLatencyMs: number;
+  proofAttempts: number;
+  proofCompletions: number;
+  proofDeadlineStops: number;
+  cumulativeCompletedImprovementBps: number;
+};
+
+type CandidateTacticState = {
+  attempts: number;
+  improvements: number;
+  stalls: number;
+  cumulativeImprovementBps: number;
+  cumulativeLatencyMs: number;
+  locallyDeprioritizedUntilAttempt: number;
+};
+
+type TransitionAggregate = {
+  attempts: number;
+  improvements: number;
+  cumulativeImprovementBps: number;
+};
+
+type CandidateState = {
+  generation: string;
+  sourceTimestamp: number;
+  sourceExpiresAt: number;
+  rank: ApeMeritRank;
+  protectedRank: ApeMeritRank;
+  attempts: number;
+  improvements: number;
+  noImprovementStreak: number;
+  cumulativeImprovementBps: number;
+  cumulativeLatencyMs: number;
+  triedTactics: Set<ApeTactic>;
+  lastTactic: ApeTactic | null;
+  lastWinningTactic: ApeTactic | null;
+  retired: boolean;
+  tacticStates: Map<ApeTactic, CandidateTacticState>;
+  cachedPlan: ApeCounterfactualPlan | null;
+};
+
+export interface ApeCounterfactualPlan {
+  candidateId: string;
+  sequence: ApeTactic[];
+  planningDepth: number;
+  brainCount: number;
+  preferredFirstTactic: ApeTactic;
+  exactEconomicsAuthority: false;
+  executionAuthority: false;
+}
+
+const candidateStates = new Map<string, CandidateState>();
+const tacticAggregates = new Map<ApeTactic, TacticAggregate>();
+const transitionAggregates = new Map<string, TransitionAggregate>();
+const MAX_RESIDENT_KEYS = 4096;
+
+function bounded(raw: unknown, fallback: number, min: number, max: number): number {
+  const value = Number(raw);
+  return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
+}
+
+function pruneMap<T>(map: Map<string, T>): void {
+  while (map.size > MAX_RESIDENT_KEYS) {
+    const key = map.keys().next().value as string | undefined;
+    if (!key) break;
+    map.delete(key);
+  }
+}
+
+export function getApeCandidateGeneration(root: ZeroCapitalOpportunity): string {
+  return [root.id, root.timestamp, root.expiresAt, root.flashLoanAmount.toString()].join(':');
+}
+
+function freshCandidateState(root: ZeroCapitalOpportunity): CandidateState {
+  return {
+    generation: getApeCandidateGeneration(root),
+    sourceTimestamp: root.timestamp,
+    sourceExpiresAt: root.expiresAt,
+    rank: 0,
+    protectedRank: 0,
+    attempts: 0,
+    improvements: 0,
+    noImprovementStreak: 0,
+    cumulativeImprovementBps: 0,
+    cumulativeLatencyMs: 0,
+    triedTactics: new Set<ApeTactic>(),
+    lastTactic: null,
+    lastWinningTactic: null,
+    retired: false,
+    tacticStates: new Map<ApeTactic, CandidateTacticState>(),
+    cachedPlan: null,
+  };
+}
+
+function incomingGenerationIsNewer(root: ZeroCapitalOpportunity, current: CandidateState): boolean {
+  if (root.timestamp !== current.sourceTimestamp) return root.timestamp > current.sourceTimestamp;
+  if (root.expiresAt !== current.sourceExpiresAt) return root.expiresAt > current.sourceExpiresAt;
+  return false;
+}
+
+function stateFor(root: ZeroCapitalOpportunity): CandidateState {
+  const generation = getApeCandidateGeneration(root);
+  const current = candidateStates.get(root.id);
+  if (!current) {
+    const next = freshCandidateState(root);
+    candidateStates.set(root.id, next);
+    pruneMap(candidateStates);
+    return next;
+  }
+  if (current.generation === generation) return current;
+
+  // A late async result must never roll the authority back to an older generation.
+  if (!incomingGenerationIsNewer(root, current)) return current;
+  const next = freshCandidateState(root);
+  candidateStates.set(root.id, next);
+  pruneMap(candidateStates);
+  return next;
+}
+
+/** O(1) stale-generation guard for asynchronous worker results. */
+export function isCurrentApeCandidateGeneration(
+  root: ZeroCapitalOpportunity,
+  generation: string,
+): boolean {
+  const current = candidateStates.get(root.id);
+  if (!current) return generation === getApeCandidateGeneration(root);
+  return current.generation === generation;
+}
+
+function tacticStateFor(state: CandidateState, tactic: ApeTactic): CandidateTacticState {
+  const current = state.tacticStates.get(tactic);
+  if (current) return current;
+  const created: CandidateTacticState = {
+    attempts: 0,
+    improvements: 0,
+    stalls: 0,
+    cumulativeImprovementBps: 0,
+    cumulativeLatencyMs: 0,
+    locallyDeprioritizedUntilAttempt: 0,
+  };
+  state.tacticStates.set(tactic, created);
+  return created;
+}
+
+function strictNormalizedImprovement(before: ZeroCapitalOpportunity, after: ZeroCapitalOpportunity): boolean {
+  if (before.flashLoanAmount <= 0n || after.flashLoanAmount <= 0n) return false;
+  return after.expectedProfit * before.flashLoanAmount > before.expectedProfit * after.flashLoanAmount;
+}
+
+function improvementBps(before: ZeroCapitalOpportunity, after: ZeroCapitalOpportunity): number {
+  if (!Number.isFinite(before.netProfitBps) || !Number.isFinite(after.netProfitBps)) return 0;
+  return after.netProfitBps - before.netProfitBps;
+}
+
+function aggregateFor(tactic: ApeTactic): TacticAggregate {
+  const current = tacticAggregates.get(tactic);
+  if (current) return current;
+  const created: TacticAggregate = {
+    attempts: 0,
+    improvements: 0,
+    strictPositiveWins: 0,
+    cumulativeImprovementBps: 0,
+    cumulativeLatencyMs: 0,
+    proofAttempts: 0,
+    proofCompletions: 0,
+    proofDeadlineStops: 0,
+    cumulativeCompletedImprovementBps: 0,
+  };
+  tacticAggregates.set(tactic, created);
+  return created;
+}
+
+/**
+ * Separate proof feedback from exploratory BPS movement. Route discovery can inform
+ * search ordering, but unfinished work must not earn the same elastic budget credit
+ * as a completed exact proof. This is scheduling telemetry only; it owns no economics.
+ */
+export function recordApeTacticProofOutcome(input: {
+  tactic: ApeTactic;
+  completed: boolean;
+  deadlineStopped?: boolean;
+  completedImprovementBps?: number;
+}): void {
+  const aggregate = aggregateFor(input.tactic);
+  aggregate.proofAttempts += 1;
+  if (input.completed) {
+    aggregate.proofCompletions += 1;
+    const improvement = Number(input.completedImprovementBps ?? 0);
+    if (Number.isFinite(improvement) && improvement > 0) {
+      aggregate.cumulativeCompletedImprovementBps += improvement;
+    }
+  }
+  if (input.deadlineStopped) aggregate.proofDeadlineStops += 1;
+}
+
+function transitionKey(from: ApeTactic, to: ApeTactic): string {
+  return `${from}->${to}`;
+}
+
+function promote(rank: ApeMeritRank, steps: number): ApeMeritRank {
+  return Math.max(0, Math.min(4, rank + steps)) as ApeMeritRank;
+}
+
+function demote(rank: ApeMeritRank): ApeMeritRank {
+  return Math.max(0, rank - 1) as ApeMeritRank;
+}
+
+function tacticAverageLatencyMs(tactic: ApeTactic): number {
+  const aggregate = tacticAggregates.get(tactic);
+  if (!aggregate || aggregate.attempts <= 0) return Number.POSITIVE_INFINITY;
+  return aggregate.cumulativeLatencyMs / aggregate.attempts;
+}
+
+function tacticSuccessRate(tactic: ApeTactic): number {
+  const aggregate = tacticAggregates.get(tactic);
+  return aggregate && aggregate.attempts > 0 ? aggregate.improvements / aggregate.attempts : 0;
+}
+
+function tacticImprovementPerMs(tactic: ApeTactic): number {
+  const aggregate = tacticAggregates.get(tactic);
+  return aggregate && aggregate.cumulativeLatencyMs > 0
+    ? aggregate.cumulativeImprovementBps / aggregate.cumulativeLatencyMs
+    : 0;
+}
+
+function tacticCompletedProofRate(tactic: ApeTactic): number {
+  const aggregate = tacticAggregates.get(tactic);
+  return aggregate && aggregate.proofAttempts > 0
+    ? aggregate.proofCompletions / aggregate.proofAttempts
+    : 0;
+}
+
+function tacticCompletedImprovementPerMs(tactic: ApeTactic): number {
+  const aggregate = tacticAggregates.get(tactic);
+  return aggregate && aggregate.cumulativeLatencyMs > 0
+    ? aggregate.cumulativeCompletedImprovementBps / aggregate.cumulativeLatencyMs
+    : 0;
+}
+
+function tacticProofDeadlineRate(tactic: ApeTactic): number {
+  const aggregate = tacticAggregates.get(tactic);
+  return aggregate && aggregate.proofAttempts > 0
+    ? aggregate.proofDeadlineStops / aggregate.proofAttempts
+    : 0;
+}
+
+function locallyDeprioritized(state: CandidateState, tactic: ApeTactic): boolean {
+  const local = tacticStateFor(state, tactic);
+  return local.locallyDeprioritizedUntilAttempt > state.attempts;
+}
+
+function refreshLocalOutlierState(state: CandidateState, tactic: ApeTactic): void {
+  const local = tacticStateFor(state, tactic);
+  const average = local.attempts > 0 ? local.cumulativeLatencyMs / local.attempts : 0;
+  const globalAverage = tacticAverageLatencyMs(tactic);
+  const repeatedStall = local.stalls >= 2;
+  const slow = average > 0 && Number.isFinite(globalAverage) && average >= Math.max(250, globalAverage * 1.35);
+  if (repeatedStall && slow) {
+    local.locallyDeprioritizedUntilAttempt = Math.max(local.locallyDeprioritizedUntilAttempt, state.attempts + 2);
+  }
+}
+
+/**
+ * Candidate merit and tactic merit are intentionally separate. This is the single
+ * synchronous writer for APE candidate command/ownership state; workers only report
+ * measured outcomes and cannot retire another candidate.
+ */
+export function recordApeCommandOutcome(input: {
+  root: ZeroCapitalOpportunity;
+  before: ZeroCapitalOpportunity;
+  after: ZeroCapitalOpportunity;
+  tactic: ApeTactic;
+  elapsedMs: number;
+}): void {
+  const expectedGeneration = getApeCandidateGeneration(input.root);
+  const state = stateFor(input.root);
+  if (state.generation !== expectedGeneration) return;
+  const local = tacticStateFor(state, input.tactic);
+  const aggregate = aggregateFor(input.tactic);
+  const elapsedMs = Math.max(0, Number.isFinite(input.elapsedMs) ? input.elapsedMs : 0);
+  const priorAverageImprovement = state.improvements > 0
+    ? state.cumulativeImprovementBps / state.improvements
+    : 0;
+  const deltaBps = improvementBps(input.before, input.after);
+  const improved = strictNormalizedImprovement(input.before, input.after) && deltaBps > 0;
+  const previousTactic = state.lastTactic;
+
+  state.attempts += 1;
+  state.triedTactics.add(input.tactic);
+  state.cumulativeLatencyMs += elapsedMs;
+  local.attempts += 1;
+  local.cumulativeLatencyMs += elapsedMs;
+  aggregate.attempts += 1;
+  aggregate.cumulativeLatencyMs += elapsedMs;
+
+  if (improved) {
+    state.improvements += 1;
+    state.noImprovementStreak = 0;
+    state.cumulativeImprovementBps += deltaBps;
+    const steps = priorAverageImprovement > 0 && deltaBps > priorAverageImprovement ? 2 : 1;
+    state.rank = promote(state.rank, steps);
+    state.protectedRank = Math.max(state.protectedRank, state.rank) as ApeMeritRank;
+    state.lastWinningTactic = input.tactic;
+    state.retired = false;
+    local.improvements += 1;
+    local.stalls = 0;
+    local.cumulativeImprovementBps += deltaBps;
+    local.locallyDeprioritizedUntilAttempt = 0;
+    aggregate.improvements += 1;
+    aggregate.cumulativeImprovementBps += deltaBps;
+    if (clearsStrictPositiveOutputThreshold(input.after)) aggregate.strictPositiveWins += 1;
+  } else {
+    state.noImprovementStreak += 1;
+    local.stalls += 1;
+    refreshLocalOutlierState(state, input.tactic);
+    if (state.improvements === 0 && state.noImprovementStreak >= 2) {
+      state.rank = demote(state.rank);
+    } else if (state.rank < state.protectedRank) {
+      state.rank = state.protectedRank;
+    }
+  }
+
+  if (previousTactic && previousTactic !== input.tactic) {
+    const key = transitionKey(previousTactic, input.tactic);
+    const transition = transitionAggregates.get(key) ?? { attempts: 0, improvements: 0, cumulativeImprovementBps: 0 };
+    transition.attempts += 1;
+    if (improved) {
+      transition.improvements += 1;
+      transition.cumulativeImprovementBps += deltaBps;
+    }
+    transitionAggregates.set(key, transition);
+    pruneMap(transitionAggregates);
+  }
+  state.lastTactic = input.tactic;
+  state.cachedPlan = null;
+}
+
+/**
+ * Current-generation retirement is based only on measured tactic exhaustion. Profit
+ * crossing above zero never retires optimization. Fresh Stage-1 evidence automatically
+ * creates a new generation and resurrects the candidate.
+ */
+export function candidateRetiredForGeneration(root: ZeroCapitalOpportunity): boolean {
+  const expectedGeneration = getApeCandidateGeneration(root);
+  const state = stateFor(root);
+  if (state.generation !== expectedGeneration) return true;
+  if (state.retired) return true;
+  const maxStalls = Math.trunc(bounded(process.env.ZERO_CAPITAL_APE_RETIRE_AFTER_STALLS, 4, 3, 8));
+  const minDistinctTactics = Math.trunc(bounded(process.env.ZERO_CAPITAL_APE_RETIRE_MIN_TACTICS, 3, 2, 3));
+  const exhaustedDistinctTactics = [...state.tacticStates.values()].filter(local => local.stalls > 0).length;
+  if (
+    state.noImprovementStreak >= maxStalls
+    && state.triedTactics.size >= minDistinctTactics
+    && exhaustedDistinctTactics >= minDistinctTactics
+  ) state.retired = true;
+  return state.retired;
+}
+
+export function getApeTacticDemandMultiplier(tactic: ApeTactic): number {
+  const explorationSuccess = tacticSuccessRate(tactic);
+  const explorationEfficiency = tacticImprovementPerMs(tactic);
+  const proofRate = tacticCompletedProofRate(tactic);
+  const completedEfficiency = tacticCompletedImprovementPerMs(tactic);
+  const proofDeadlineRate = tacticProofDeadlineRate(tactic);
+  const latency = tacticAverageLatencyMs(tactic);
+  const latencyPenalty = Number.isFinite(latency) ? Math.min(0.6, Math.log1p(latency) / 16) : 0;
+
+  if (tactic === 'route_split' && (tacticAggregates.get(tactic)?.proofAttempts ?? 0) > 0) {
+    const cappedExplorationCredit = Math.min(0.15, Math.max(0, explorationSuccess) * 0.1 + Math.max(0, explorationEfficiency) * 5);
+    const completedYieldCredit = proofRate + Math.max(0, completedEfficiency) * 30;
+    const deadlinePenalty = Math.min(0.75, proofDeadlineRate * 0.75);
+    return Math.max(0.35, Math.min(3, 1 + completedYieldCredit + cappedExplorationCredit - latencyPenalty - deadlinePenalty));
+  }
+
+  return Math.max(0.35, Math.min(3, 1 + explorationSuccess + Math.max(0, explorationEfficiency) * 30 - latencyPenalty));
+}
+
+function transitionScore(from: ApeTactic | null, to: ApeTactic): number {
+  if (!from || from === to) return 0;
+  const aggregate = transitionAggregates.get(transitionKey(from, to));
+  if (!aggregate || aggregate.attempts <= 0) return 0;
+  return (aggregate.improvements / aggregate.attempts) * 10
+    + aggregate.cumulativeImprovementBps / aggregate.attempts;
+}
+
+/**
+ * Cached three-tactic plan. Intelligence is resident and reused; no network, model,
+ * persistence, or deep synchronous search is introduced into the APE window.
+ */
+export function buildApeCounterfactualPlan(input: {
+  root: ZeroCapitalOpportunity;
+  compatibleGroupSize: number;
+}): ApeCounterfactualPlan {
+  const state = stateFor(input.root);
+  if (state.generation !== getApeCandidateGeneration(input.root)) {
+    return {
+      candidateId: input.root.id,
+      sequence: ['single_route_v4', 'route_split'],
+      planningDepth: 2,
+      brainCount: 5,
+      preferredFirstTactic: 'single_route_v4',
+      exactEconomicsAuthority: false,
+      executionAuthority: false,
+    };
+  }
+  if (state.cachedPlan) return state.cachedPlan;
+
+  const compatible: ApeTactic[] = ['route_split', 'single_route_v4'];
+  if (input.compatibleGroupSize >= 2) compatible.push('shared_principal_stack');
+  const defect = classifyApeRescueDefect(input.root);
+  const defectFirst: ApeTactic = defect === 'structural_nonpositive_gross' ? 'route_split' : 'single_route_v4';
+  const remaining = compatible.filter(tactic => tactic !== defectFirst);
+
+  remaining.sort((left, right) => {
+    const stickyLeft = state.lastWinningTactic === left && !locallyDeprioritized(state, left) ? 1 : 0;
+    const stickyRight = state.lastWinningTactic === right && !locallyDeprioritized(state, right) ? 1 : 0;
+    if (stickyLeft !== stickyRight) return stickyRight - stickyLeft;
+    const ejectedLeft = Number(locallyDeprioritized(state, left));
+    const ejectedRight = Number(locallyDeprioritized(state, right));
+    if (ejectedLeft !== ejectedRight) return ejectedLeft - ejectedRight;
+    const transitionDelta = transitionScore(state.lastTactic ?? defectFirst, right)
+      - transitionScore(state.lastTactic ?? defectFirst, left);
+    if (Math.abs(transitionDelta) > 1e-12) return transitionDelta;
+    const demandDelta = getApeTacticDemandMultiplier(right) - getApeTacticDemandMultiplier(left);
+    if (Math.abs(demandDelta) > 1e-12) return demandDelta;
+    return tacticAverageLatencyMs(left) - tacticAverageLatencyMs(right);
+  });
+
+  const plan: ApeCounterfactualPlan = {
+    candidateId: input.root.id,
+    sequence: [defectFirst, ...remaining],
+    planningDepth: 1 + remaining.length,
+    brainCount: 5,
+    preferredFirstTactic: defectFirst,
+    exactEconomicsAuthority: false,
+    executionAuthority: false,
+  };
+  state.cachedPlan = plan;
+  return plan;
+}
+
+export function rankApeCommandCandidates(input: {
+  roots: readonly ZeroCapitalOpportunity[];
+  current: readonly ZeroCapitalOpportunity[];
+  startedAt: number;
+  now?: number;
+}): ZeroCapitalOpportunity[] {
+  const now = input.now ?? Date.now();
+  const snapshots = buildApeCandidateRescueSnapshots({ ...input, now });
+  const snapshotById = new Map(snapshots.map(item => [item.id, item]));
+  const roots = new Map(input.roots.map(item => [item.id, item]));
+
+  return [...input.current]
+    .filter(item => !candidateRetiredForGeneration(roots.get(item.id) ?? item))
+    .sort((left, right) => {
+      const rootLeft = roots.get(left.id) ?? left;
+      const rootRight = roots.get(right.id) ?? right;
+      const leftState = stateFor(rootLeft);
+      const rightState = stateFor(rootRight);
+      const a = snapshotById.get(left.id)!;
+      const b = snapshotById.get(right.id)!;
+      if (leftState.rank !== rightState.rank) return rightState.rank - leftState.rank;
+      const leftScore = a.improvementVelocityBpsPerSecond * 5
+        + a.improvementBps * 3
+        - a.distanceToPositiveBps * 0.03
+        - leftState.noImprovementStreak * 0.35
+        + (a.fresh ? 0.5 : -2);
+      const rightScore = b.improvementVelocityBpsPerSecond * 5
+        + b.improvementBps * 3
+        - b.distanceToPositiveBps * 0.03
+        - rightState.noImprovementStreak * 0.35
+        + (b.fresh ? 0.5 : -2);
+      if (leftScore !== rightScore) return rightScore - leftScore;
+      if (a.slackMs !== b.slackMs) return a.slackMs - b.slackMs;
+      return left.id.localeCompare(right.id);
+    });
+}
+
+export function getApeAdaptiveCommandSnapshot() {
+  const states = [...candidateStates.values()];
+  const retiredGenerations = states.filter(state => state.retired).length;
+  const rankHistogram = [0, 1, 2, 3, 4].map(rank => ({
+    rank,
+    count: states.filter(state => state.rank === rank).length,
+  }));
+  const locallyDeprioritizedTactics = states.reduce((sum, state) => sum + [...state.tacticStates.entries()]
+    .filter(([tactic]) => locallyDeprioritized(state, tactic)).length, 0);
+  return {
+    candidateStateKeys: candidateStates.size,
+    retiredGenerations,
+    rankHistogram,
+    locallyDeprioritizedTactics,
+    tacticStats: [...tacticAggregates.entries()].map(([tactic, aggregate]) => ({
+      tactic,
+      attempts: aggregate.attempts,
+      improvements: aggregate.improvements,
+      strictPositive: aggregate.strictPositiveWins,
+      strictPositiveWins: aggregate.strictPositiveWins,
+      proofAttempts: aggregate.proofAttempts,
+      proofCompletions: aggregate.proofCompletions,
+      proofCompletionRate: aggregate.proofAttempts > 0 ? aggregate.proofCompletions / aggregate.proofAttempts : 0,
+      proofDeadlineStops: aggregate.proofDeadlineStops,
+      explorationImprovementPerMs: tacticImprovementPerMs(tactic),
+      completedImprovementPerMs: tacticCompletedImprovementPerMs(tactic),
+      improvementPerMs: tacticImprovementPerMs(tactic),
+      averageLatencyMs: tacticAverageLatencyMs(tactic),
+      demandMultiplier: getApeTacticDemandMultiplier(tactic),
+    })),
+    learnedTransitions: transitionAggregates.size,
+    meritPromotionAuthority: 'search_priority_only' as const,
+    candidateAndTacticMeritSeparated: true as const,
+    promotionHysteresisWithinEvidenceGeneration: true as const,
+    localLatencyOutlierDeprioritization: true as const,
+    stickyWinningTacticAffinity: true as const,
+    cachedCounterfactualPlanning: true as const,
+    incompleteExplorationCannotDominateDemand: true as const,
+    completedExecutableProofYieldControlsRouteSplitBudget: true as const,
+    generationLocalRetirement: true as const,
+    monotonicGenerationAuthority: true as const,
+    staleGenerationCannotRollBackAuthority: true as const,
+    retirementAuthority: 'candidate_local_measured_tactic_exhaustion_only' as const,
+    strictPositiveStopsOptimization: false as const,
+    synchronousCandidateStateAuthority: true as const,
+    staleGenerationResultGuardAvailable: true as const,
+    resurrectionOnNewEvidenceGeneration: true as const,
+    multiBrainCounterfactualPlanning: true as const,
+    exactEconomicsAuthority: false as const,
+    executionAuthority: false as const,
+  };
+}

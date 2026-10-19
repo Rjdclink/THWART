@@ -1,0 +1,1088 @@
+/**
+ * PANTHEON Crawler Orchestrator
+ * 
+ * Central orchestration system for all PANTHEON crawler functions.
+ * Utilizes every aspect of the crawler systems as originally intended:
+ * 
+ * TRINITY CRAWLERS:
+ * - Blizzard: Mass parallel scraping with unique fingerprints
+ * - Cerberus: Three-headed adaptive defense system (Ice, Hydra, Zombie)
+ * - Lich: Immortal necromancer with zombie army and ghost swarm
+ * 
+ * SPECIALIZED CRAWLERS:
+ * - StarTrek: Federation explorer with warp drive and phasers
+ * - BirdOfPrey: Klingon predator with perfect cloaking
+ * - SixDegrees: Social graph mapper for relationship discovery
+ * 
+ * ADDITIONAL CRAWLERS:
+ * - ICE: Stealthy intelligence crawler
+ * - HYDRA: Multi-headed parallel crawler
+ * - WRAITH: Ghost-mode stealth crawler
+ * 
+ * MUTUAL EXCLUSION:
+ * - PANTHEON is NOT available when cryptocrawler system is running
+ * - Resource contention is prevented through system state management
+ * - AI providers are shared but crawler systems are exclusive
+ * 
+ * ZERO-API MODE:
+ * - Crawlers operate independently of AI API availability
+ * - Local intelligence engine provides analysis when APIs unavailable
+ */
+
+import { PhylacterySystem } from './storage/PhylacterySystem';
+import { StealthInfrastructure } from './stealth/StealthInfrastructure';
+import {
+  PANTHEON_PRIMARY_CRAWLER_IDS,
+  type PantheonPrimaryCrawlerId,
+} from './pantheon/PantheonCrawlerCapabilityMatrix';
+import {
+  createPantheonDeadline,
+  racePantheonAbort,
+  throwIfPantheonAborted,
+} from './pantheon/PantheonDeadline';
+import {
+  admitPantheonUrl,
+  getPantheonAcquisitionContext,
+  pantheonTelemetryUrl,
+  runWithPantheonAcquisitionContext,
+} from './crawlers/PublicAcquisitionInfrastructure';
+
+// Crawler imports
+import { 
+  BlizzardCrawler, 
+  CerberusCrawler, 
+  LichCrawler 
+} from './crawlers/TrinityCrawlers';
+import { StarTrekCrawler } from './crawlers/StarTrekCrawler';
+import { BirdOfPreyCrawler } from './crawlers/BirdOfPreyCrawler';
+import { SixDegreesCrawler, canonicalizeSixDegreesTarget } from './crawlers/SixDegreesCrawler';
+
+// ==================== SYSTEM STATE ====================
+
+/**
+ * System mode - determines which crawler system is active
+ */
+export enum SystemMode {
+  PANTHEON = 'pantheon',
+  CRYPTOCRAWLER = 'cryptocrawler',
+  STANDBY = 'standby',
+}
+
+/**
+ * Global system state for mutual exclusion
+ */
+interface SystemState {
+  currentMode: SystemMode;
+  modeStartTime: number;
+  lastModeSwitch: number;
+  panteonActive: boolean;
+  cryptocrawlerActive: boolean;
+  lockedBy?: string;
+  lockExpiry?: number;
+}
+
+const systemState: SystemState = {
+  currentMode: SystemMode.STANDBY,
+  modeStartTime: Date.now(),
+  lastModeSwitch: Date.now(),
+  panteonActive: false,
+  cryptocrawlerActive: false,
+};
+
+// ==================== MUTUAL EXCLUSION ====================
+
+/**
+ * Check if PANTHEON is available (not running cryptocrawler)
+ */
+export function isPantheonAvailable(): boolean {
+  // PANTHEON is NOT available when cryptocrawler is active
+  if (systemState.cryptocrawlerActive) {
+    console.log('[PANTHEON] Unavailable - Cryptocrawler system is running');
+    return false;
+  }
+  
+  // Check for expired locks
+  if (systemState.lockedBy && systemState.lockExpiry) {
+    if (Date.now() > systemState.lockExpiry) {
+      console.log('[PANTHEON] Lock expired, releasing');
+      systemState.lockedBy = undefined;
+      systemState.lockExpiry = undefined;
+    } else if (systemState.lockedBy === 'cryptocrawler') {
+      return false;
+    }
+  }
+  
+  return true;
+}
+
+/**
+ * Check if cryptocrawler is available (not running PANTHEON)
+ */
+export function isCryptocrawlerAvailable(): boolean {
+  // Cryptocrawler is NOT available when PANTHEON is active
+  if (systemState.panteonActive) {
+    console.log('[CRYPTOCRAWLER] Unavailable - PANTHEON system is running');
+    return false;
+  }
+  
+  // Check for expired locks
+  if (systemState.lockedBy && systemState.lockExpiry) {
+    if (Date.now() > systemState.lockExpiry) {
+      systemState.lockedBy = undefined;
+      systemState.lockExpiry = undefined;
+    } else if (systemState.lockedBy === 'pantheon') {
+      return false;
+    }
+  }
+  
+  return true;
+}
+
+/**
+ * Acquire system lock for exclusive access
+ */
+export function acquireSystemLock(system: 'pantheon' | 'cryptocrawler', durationMs: number = 300000): boolean {
+  const now = Date.now();
+  
+  // Check for existing valid lock
+  if (systemState.lockedBy && systemState.lockExpiry && now < systemState.lockExpiry) {
+    if (systemState.lockedBy !== system) {
+      console.log(`[SYSTEM] Lock denied - ${systemState.lockedBy} holds exclusive access until ${new Date(systemState.lockExpiry).toISOString()}`);
+      return false;
+    }
+    // Extend existing lock
+    systemState.lockExpiry = now + durationMs;
+    return true;
+  }
+  
+  // Acquire new lock
+  systemState.lockedBy = system;
+  systemState.lockExpiry = now + durationMs;
+  systemState.currentMode = system === 'pantheon' ? SystemMode.PANTHEON : SystemMode.CRYPTOCRAWLER;
+  systemState.modeStartTime = now;
+  systemState.lastModeSwitch = now;
+  
+  if (system === 'pantheon') {
+    systemState.panteonActive = true;
+    systemState.cryptocrawlerActive = false;
+  } else {
+    systemState.panteonActive = false;
+    systemState.cryptocrawlerActive = true;
+  }
+  
+  console.log(`[SYSTEM] Lock acquired by ${system} for ${durationMs}ms`);
+  return true;
+}
+
+/**
+ * Release system lock
+ */
+export function releaseSystemLock(system: 'pantheon' | 'cryptocrawler'): boolean {
+  if (systemState.lockedBy !== system) {
+    console.log(`[SYSTEM] Cannot release lock - owned by ${systemState.lockedBy}, not ${system}`);
+    return false;
+  }
+  
+  systemState.lockedBy = undefined;
+  systemState.lockExpiry = undefined;
+  systemState.currentMode = SystemMode.STANDBY;
+  systemState.lastModeSwitch = Date.now();
+  systemState.panteonActive = false;
+  systemState.cryptocrawlerActive = false;
+  
+  console.log(`[SYSTEM] Lock released by ${system}`);
+  return true;
+}
+
+/**
+ * Get current system status
+ */
+export function getSystemStatus(): SystemState & { available: { pantheon: boolean; cryptocrawler: boolean } } {
+  return {
+    ...systemState,
+    available: {
+      pantheon: isPantheonAvailable(),
+      cryptocrawler: isCryptocrawlerAvailable(),
+    },
+  };
+}
+
+// ==================== PANTHEON CRAWLER ORCHESTRATOR ====================
+
+/**
+ * Crawler result from any PANTHEON crawler
+ */
+export interface CrawlerResult {
+  crawler: string;
+  target: string;
+  content: string;
+  confidence: number;
+  timestamp: number;
+  metadata?: Record<string, any>;
+}
+
+export interface CrawlerSourceOutcome {
+  sourceUrl: string;
+  status: 'completed_with_content' | 'completed_with_evidence' | 'completed_no_evidence' | 'failed' | 'timed_out';
+  retrievedAt: string;
+  durationMs: number;
+  error?: string;
+  route?: 'primary' | 'fallback';
+  fallbackFor?: string;
+}
+
+export interface CrawlerExecutionAudit {
+  crawler: string;
+  capabilityClass: 'primary';
+  status: 'completed_with_content' | 'completed_with_evidence' | 'completed_no_evidence' | 'failed' | 'timed_out';
+  evidenceCount: number;
+  contentCount?: number;
+  attempts: number;
+  targets: number;
+  durationMs?: number;
+  queueWaitMs?: number;
+  sourceOutcomes?: CrawlerSourceOutcome[];
+  error?: string;
+  route?: 'primary' | 'fallback';
+  fallbackFor?: string;
+}
+
+/**
+ * PANTHEON search options
+ */
+export interface PantheonSearchOptions {
+  /** Search depth level (1-3) */
+  depth: 1 | 2 | 3;
+  /** Specific crawlers to use (default: all applicable) */
+  crawlers?: PantheonPrimaryCrawlerId[];
+  /** Maximum results per crawler */
+  maxResultsPerCrawler?: number;
+  /** Timeout in milliseconds */
+  timeout?: number;
+  /** Enable stealth mode */
+  stealth?: boolean;
+  /** Storm intensity for Blizzard crawler */
+  stormIntensity?: 'flurry' | 'snow' | 'storm' | 'blizzard' | 'whiteout';
+  signal?: AbortSignal;
+  /** Preserve crawler failures for attributable per-capability audits. */
+  strictErrors?: boolean;
+}
+
+const PANTHEON_CRAWLER_POOL_LIMITS: Readonly<Record<PantheonPrimaryCrawlerId, number>> = {
+  startrek: 4,
+  birdofprey: 2,
+  sixdegrees: 2,
+  cerberus: 2,
+  blizzard: 1,
+  lich: 1,
+};
+const PANTHEON_CRAWLER_POOL_QUEUE_LIMIT = 64;
+// Shadow-swarm safety cap: existing per-crawler pools remain authoritative;
+// this only prevents one request from flooding every pool at once.
+const PANTHEON_SWARM_ROUTE_LIMIT = 6;
+
+interface PantheonCrawlerPoolWaiter {
+  resolve: () => void;
+  reject: (error: Error) => void;
+  signal?: AbortSignal;
+  onAbort?: () => void;
+}
+
+const activeCrawlerRoutes = new Map<PantheonPrimaryCrawlerId, number>();
+const crawlerRouteWaiters = new Map<PantheonPrimaryCrawlerId, PantheonCrawlerPoolWaiter[]>();
+
+function drainPantheonCrawlerPool(crawler: PantheonPrimaryCrawlerId): void {
+  const waiters = crawlerRouteWaiters.get(crawler) || [];
+  const limit = PANTHEON_CRAWLER_POOL_LIMITS[crawler];
+  while ((activeCrawlerRoutes.get(crawler) || 0) < limit && waiters.length > 0) {
+    const waiter = waiters.shift()!;
+    if (waiter.signal?.aborted) continue;
+    if (waiter.onAbort) waiter.signal?.removeEventListener('abort', waiter.onAbort);
+    activeCrawlerRoutes.set(crawler, (activeCrawlerRoutes.get(crawler) || 0) + 1);
+    waiter.resolve();
+  }
+}
+
+async function acquirePantheonCrawlerSlot(crawler: PantheonPrimaryCrawlerId, signal?: AbortSignal): Promise<void> {
+  throwIfPantheonAborted(signal);
+  const active = activeCrawlerRoutes.get(crawler) || 0;
+  if (active < PANTHEON_CRAWLER_POOL_LIMITS[crawler]) {
+    activeCrawlerRoutes.set(crawler, active + 1);
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    const waiters = crawlerRouteWaiters.get(crawler) || [];
+    if (waiters.length >= PANTHEON_CRAWLER_POOL_QUEUE_LIMIT) {
+      reject(new Error(`Pantheon crawler route pool saturated: ${crawler}`));
+      return;
+    }
+    const waiter: PantheonCrawlerPoolWaiter = { resolve, reject, signal };
+    waiter.onAbort = () => {
+      const index = waiters.indexOf(waiter);
+      if (index >= 0) waiters.splice(index, 1);
+      reject(new Error('Pantheon crawler route aborted while queued'));
+    };
+    signal?.addEventListener('abort', waiter.onAbort, { once: true });
+    waiters.push(waiter);
+    crawlerRouteWaiters.set(crawler, waiters);
+    // Abort may race between the initial check and listener registration.
+    if (signal?.aborted) waiter.onAbort();
+  });
+}
+
+function releasePantheonCrawlerSlot(crawler: PantheonPrimaryCrawlerId): void {
+  activeCrawlerRoutes.set(crawler, Math.max(0, (activeCrawlerRoutes.get(crawler) || 0) - 1));
+  drainPantheonCrawlerPool(crawler);
+}
+
+export async function runPantheonCrawlerPooled<T>(
+  crawler: PantheonPrimaryCrawlerId,
+  worker: () => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  await acquirePantheonCrawlerSlot(crawler, signal);
+  try {
+    return await worker();
+  } finally {
+    releasePantheonCrawlerSlot(crawler);
+  }
+}
+
+export function getPantheonCrawlerPoolActivity(): Record<PantheonPrimaryCrawlerId, {
+  active: number;
+  queued: number;
+  limit: number;
+}> {
+  return Object.fromEntries((Object.keys(PANTHEON_CRAWLER_POOL_LIMITS) as PantheonPrimaryCrawlerId[]).map(crawler => [
+    crawler,
+    {
+      active: activeCrawlerRoutes.get(crawler) || 0,
+      queued: (crawlerRouteWaiters.get(crawler) || []).length,
+      limit: PANTHEON_CRAWLER_POOL_LIMITS[crawler],
+    },
+  ])) as Record<PantheonPrimaryCrawlerId, { active: number; queued: number; limit: number }>;
+}
+
+export function normalizePantheonCrawlerSelection(
+  crawlers: readonly string[],
+): PantheonPrimaryCrawlerId[] {
+  const allowed = new Set<string>(PANTHEON_PRIMARY_CRAWLER_IDS);
+  const unknown = crawlers.filter(crawler => !allowed.has(crawler));
+  if (unknown.length > 0) {
+    throw new Error(`Pantheon orchestrator rejected unknown crawler capability: ${[...new Set(unknown)].join(', ')}`);
+  }
+  const normalized = [...new Set(crawlers)] as PantheonPrimaryCrawlerId[];
+  if (normalized.length === 0) throw new Error('Pantheon orchestrator requires at least one crawler capability');
+  return normalized;
+}
+
+export function isPantheonCrawlerTimeout(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /timeout|timed out|deadline|abort/i.test(message);
+}
+
+export function normalizePantheonResultLimit(limit?: number): number {
+  if (limit == null) return Number.POSITIVE_INFINITY;
+  if (!Number.isFinite(limit)) return 1_000;
+  return Math.max(1, Math.min(1_000, Math.trunc(limit)));
+}
+
+/**
+ * PANTHEON Crawler Orchestrator
+ * 
+ * Coordinates all crawler systems for comprehensive data gathering.
+ */
+export class PantheonCrawlerOrchestrator {
+  private phylactery: PhylacterySystem;
+  private stealth: StealthInfrastructure;
+  
+  // Crawler instances
+  private blizzard: BlizzardCrawler | null = null;
+  private cerberus: CerberusCrawler | null = null;
+  private lich: LichCrawler | null = null;
+  private startrek: StarTrekCrawler | null = null;
+  private birdofprey: BirdOfPreyCrawler | null = null;
+  private sixdegrees: SixDegreesCrawler | null = null;
+  
+  private initialized = false;
+  
+  constructor() {
+    // Initialize infrastructure lazily
+    this.phylactery = new PhylacterySystem();
+    this.stealth = new StealthInfrastructure();
+  }
+  
+  /**
+   * Initialize all crawler systems
+   */
+  async initialize(lockDurationMs: number = 600000): Promise<void> {
+    if (this.initialized) {
+      acquireSystemLock('pantheon', Math.max(600000, lockDurationMs));
+      return;
+    }
+    
+    // Check if PANTHEON is available
+    if (!isPantheonAvailable()) {
+      throw new Error('PANTHEON unavailable - Cryptocrawler system is running');
+    }
+    
+    // Acquire system lock
+    if (!acquireSystemLock('pantheon', Math.max(600000, lockDurationMs))) {
+      throw new Error('Failed to acquire system lock for PANTHEON');
+    }
+    
+    console.log('[PANTHEON] Initializing crawler systems...');
+    
+    try {
+      // Initialize Trinity Crawlers (require phylactery and stealth)
+      this.blizzard = new BlizzardCrawler(this.phylactery, this.stealth);
+      this.cerberus = new CerberusCrawler(this.phylactery, this.stealth);
+      this.lich = new LichCrawler(this.phylactery, this.stealth);
+      
+      // Initialize Specialized Crawlers
+      // StarTrekCrawler: No constructor arguments
+      // BirdOfPreyCrawler, SixDegreesCrawler: Require stealth and phylactery
+      this.startrek = new StarTrekCrawler();
+      this.birdofprey = new BirdOfPreyCrawler(this.stealth, this.phylactery);
+      this.sixdegrees = new SixDegreesCrawler(this.stealth, this.phylactery);
+      
+      this.initialized = true;
+      console.log('[PANTHEON] All crawler systems initialized');
+      console.log('[PANTHEON] Available crawlers: Blizzard, Cerberus, Lich, StarTrek, BirdOfPrey, SixDegrees');
+    } catch (error) {
+      releaseSystemLock('pantheon');
+      throw error;
+    }
+  }
+  
+  /**
+   * Shutdown PANTHEON and release resources
+   */
+  async shutdown(): Promise<void> {
+    console.log('[PANTHEON] Shutting down crawler systems...');
+    
+    this.blizzard = null;
+    this.cerberus = null;
+    this.lich = null;
+    this.startrek = null;
+    this.birdofprey = null;
+    this.sixdegrees = null;
+    
+    this.initialized = false;
+    releaseSystemLock('pantheon');
+    
+    console.log('[PANTHEON] Shutdown complete');
+  }
+  
+  /**
+   * Execute comprehensive PANTHEON search
+   */
+  async search(targets: string[], options: PantheonSearchOptions): Promise<CrawlerResult[]> {
+    throwIfPantheonAborted(options.signal);
+    const requestedBudgetMs = Math.max(600000, options.timeout || 0);
+    if (!this.initialized) {
+      await this.initialize(requestedBudgetMs);
+    } else {
+      acquireSystemLock('pantheon', requestedBudgetMs);
+    }
+    
+    const results: CrawlerResult[] = [];
+    const crawlersToUse = normalizePantheonCrawlerSelection(
+      options.crawlers || this.getCrawlersForDepth(options.depth),
+    );
+    
+    console.log(`[PANTHEON] Executing search with depth ${options.depth}`);
+    console.log(`[PANTHEON] Targets: ${targets.length}, Crawlers: ${crawlersToUse.join(', ')}`);
+    
+    // Level 1: StarTrek (fast reconnaissance)
+    if (crawlersToUse.includes('startrek') && this.startrek) {
+      try {
+        console.log('[PANTHEON] Activating STAR TREK crawler...');
+        for (const target of targets) {
+          throwIfPantheonAborted(options.signal);
+          const result = await this.startrek.warpTo(target);
+          if (result) {
+            results.push({
+              crawler: 'startrek',
+              target,
+              content: result.content || '',
+              confidence: Number.isFinite(result.confidence) ? result.confidence : 0.7,
+              timestamp: Date.now(),
+              metadata: { ...(result.metadata || {}), warpFactor: result.metadata?.warpFactor || 5 },
+            });
+          }
+        }
+      } catch (error) {
+        console.warn('[PANTHEON] StarTrek crawler error:', error);
+        if (options.strictErrors) throw error;
+      }
+    }
+    
+    // Level 2: BirdOfPrey (stealth reconnaissance)
+    if (crawlersToUse.includes('birdofprey') && this.birdofprey) {
+      try {
+        console.log('[PANTHEON] Activating BIRD OF PREY crawler (cloaked)...');
+        for (const target of targets) {
+          throwIfPantheonAborted(options.signal);
+          const result = await this.birdofprey.hunt(target);
+          if (result) {
+            results.push({
+              crawler: 'birdofprey',
+              target,
+              content: result.content || '',
+              confidence: Number.isFinite(result.confidence) ? result.confidence : 0.8,
+              timestamp: Date.now(),
+              metadata: { ...(result.metadata || {}), cloakStatus: 'engaged' },
+            });
+          }
+        }
+      } catch (error) {
+        console.warn('[PANTHEON] BirdOfPrey crawler error:', error);
+        if (options.strictErrors) throw error;
+      }
+    }
+    
+    // Level 2+: SixDegrees (relationship mapping)
+    if (crawlersToUse.includes('sixdegrees') && this.sixdegrees) {
+      try {
+        console.log('[PANTHEON] Activating SIX DEGREES crawler...');
+        for (const target of targets) {
+          throwIfPantheonAborted(options.signal);
+          // Fetch only the controller-authorized seed. Related links are
+          // returned as candidates for the category ledger, never followed here.
+          const graph = await this.sixdegrees.mapConnections(target, 1);
+          if (graph) {
+            results.push({
+              crawler: 'sixdegrees',
+              target,
+              content: JSON.stringify(graph.nodes || []),
+              confidence: 0.75,
+              timestamp: Date.now(),
+              metadata: { 
+                nodeCount: graph.nodes?.length || 0,
+                edgeCount: graph.edges?.length || 0,
+                discoveredCandidates: (graph.edges || [])
+                  .map(edge => edge.to)
+                  .filter(Boolean)
+                  .flatMap(domain => {
+                    try {
+                      return [canonicalizeSixDegreesTarget(domain).url];
+                    } catch {
+                      return [];
+                    }
+                  })
+                  .slice(0, 20),
+              },
+            });
+          }
+        }
+      } catch (error) {
+        console.warn('[PANTHEON] SixDegrees crawler error:', error);
+        if (options.strictErrors) throw error;
+      }
+    }
+    
+    // Level 3: Cerberus (triple-headed attack)
+    if (crawlersToUse.includes('cerberus') && this.cerberus) {
+      try {
+        console.log('[PANTHEON] Activating CERBERUS crawler (three-headed)...');
+        for (const target of targets) {
+          throwIfPantheonAborted(options.signal);
+          const result = await this.cerberus.attack(target);
+          if (result) {
+            results.push({
+              crawler: 'cerberus',
+              target,
+              content: result.content || '',
+              confidence: Number.isFinite(result.confidence) ? result.confidence : 0.85,
+              timestamp: result.timestamp,
+              metadata: { ...(result.metadata || {}), headUsed: result.headUsed },
+            });
+          }
+        }
+      } catch (error) {
+        console.warn('[PANTHEON] Cerberus crawler error:', error);
+        if (options.strictErrors) throw error;
+      }
+    }
+    
+    // Level 3+: Blizzard (mass parallel scraping)
+    if (crawlersToUse.includes('blizzard') && this.blizzard) {
+      try {
+        const intensity = options.stormIntensity || 'snow';
+        console.log(`[PANTHEON] Activating BLIZZARD crawler (${intensity} intensity)...`);
+        throwIfPantheonAborted(options.signal);
+        const blizzardResults = await this.blizzard.deploy(targets, intensity);
+        throwIfPantheonAborted(options.signal);
+        for (const result of blizzardResults) {
+          results.push({
+            crawler: 'blizzard',
+            target: result.target,
+            content: result.content || '',
+            confidence: Number.isFinite(result.confidence) ? result.confidence : 0.8,
+            timestamp: result.timestamp,
+            metadata: { ...(result.metadata || {}), intensity },
+          });
+        }
+      } catch (error) {
+        console.warn('[PANTHEON] Blizzard crawler error:', error);
+        if (options.strictErrors) throw error;
+      }
+    }
+    
+    // Level 3: Lich (necromancer with army)
+    if (crawlersToUse.includes('lich') && this.lich) {
+      try {
+        console.log('[PANTHEON] Activating LICH crawler (forbidden magic)...');
+        for (const target of targets) {
+          throwIfPantheonAborted(options.signal);
+          const spellType = options.depth >= 3 ? 'forbidden' : 'simple';
+          const result = await this.lich.castSpell(target, spellType);
+          if (result) {
+            results.push({
+              crawler: 'lich',
+              target,
+              content: result.content || '',
+              confidence: Number.isFinite(result.confidence) ? result.confidence : 0.9,
+              timestamp: result.timestamp,
+              metadata: { 
+                ...(result.metadata || {}),
+                spellType,
+                lichStatus: this.lich.getStatus(),
+              },
+            });
+          }
+        }
+      } catch (error) {
+        console.warn('[PANTHEON] Lich crawler error:', error);
+        if (options.strictErrors) throw error;
+      }
+    }
+    
+    const maxResultsPerCrawler = normalizePantheonResultLimit(options.maxResultsPerCrawler);
+    const retainedByCrawler = new Map<string, number>();
+    const boundedResults = results.filter(result => {
+      const retained = retainedByCrawler.get(result.crawler) || 0;
+      if (retained >= maxResultsPerCrawler) return false;
+      retainedByCrawler.set(result.crawler, retained + 1);
+      return true;
+    });
+    console.log(`[PANTHEON] Search complete: ${boundedResults.length} results from ${new Set(boundedResults.map(r => r.crawler)).size} crawlers`);
+
+    return boundedResults;
+  }
+  
+  /**
+   * Background-report fan-out: run each selected primary crawler as an
+   * independent route so one failure or slow path cannot cancel the others.
+   */
+  async searchAllIsolatedWithAudit(
+    targets: string[],
+    options: PantheonSearchOptions,
+  ): Promise<{ results: CrawlerResult[]; audit: CrawlerExecutionAudit[] }> {
+    const requestedBudgetMs = Math.max(1_000, options.timeout || 60_000);
+    throwIfPantheonAborted(options.signal);
+    await this.initialize(requestedBudgetMs);
+
+    const targetAdmissions: Array<
+      { target: string; canonicalUrl: string } | { target: string; reason: string }
+    > = [...new Set(targets)].map(target => {
+      try {
+        const url = new URL(target);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+          return { target, reason: 'Unsupported acquisition protocol' };
+        }
+        const admitted = admitPantheonUrl(target);
+        return admitted.ok
+          ? { target, canonicalUrl: admitted.url }
+          : { target, reason: admitted.reason };
+      } catch (error) {
+        return {
+          target,
+          reason: error instanceof Error ? error.message : 'Invalid URL',
+        };
+      }
+    });
+    const validTargets = [...new Set(targetAdmissions.reduce<string[]>((accepted, item) => {
+      if ('canonicalUrl' in item && typeof item.canonicalUrl === 'string') accepted.push(item.canonicalUrl);
+      return accepted;
+    }, []))];
+    const rejectedTargets: Array<{ sourceUrl: string; reason: string }> = targetAdmissions.flatMap(item => 'reason' in item
+      ? [{ sourceUrl: item.target, reason: item.reason }]
+      : []);
+    const crawlersToUse = normalizePantheonCrawlerSelection(
+      options.crawlers || this.getCrawlersForDepth(options.depth),
+    );
+    const inheritedAcquisition = getPantheonAcquisitionContext();
+    const orchestrationDeadlineAt = Math.min(
+      inheritedAcquisition?.authority.deadlineAt ?? Number.MAX_SAFE_INTEGER,
+      Date.now() + requestedBudgetMs,
+    );
+    const orchestrationDeadline = createPantheonDeadline(orchestrationDeadlineAt, options.signal);
+    const executionRoute = inheritedAcquisition?.authority.route || 'primary';
+    const executionFallbackFor = inheritedAcquisition?.authority.fallbackFor;
+    let nextSwarmRoute = 0;
+    const runSwarmRoute = async (crawler: PantheonPrimaryCrawlerId) => {
+      const queuedAt = Date.now();
+      return runPantheonCrawlerPooled(crawler, async () => {
+        const queueWaitMs = Date.now() - queuedAt;
+        const executionStartedAt = Date.now();
+        let attempts = 0;
+        let results: CrawlerResult[] = [];
+        let lastError = validTargets.length === 0 && rejectedTargets.length > 0
+          ? `All targets skipped before dispatch: ${rejectedTargets.map(item => item.reason).join('; ')}`
+          : '';
+
+        for (const target of validTargets) {
+          console.log(`[PANTHEON][CRAWLER-URL] ${JSON.stringify({
+            event: 'dispatch',
+            investigationId: inheritedAcquisition?.authority.investigationId,
+            categoryId: inheritedAcquisition?.authority.categoryId,
+            workId: inheritedAcquisition?.authority.workId,
+            capability: crawler,
+            route: executionRoute,
+            ...(executionFallbackFor ? { fallbackFor: executionFallbackFor } : {}),
+            url: pantheonTelemetryUrl(target),
+            queueWaitMs,
+          })}`);
+        }
+        for (const rejected of rejectedTargets) {
+          console.log(`[PANTHEON][CRAWLER-URL] ${JSON.stringify({
+            event: 'outcome',
+            investigationId: inheritedAcquisition?.authority.investigationId,
+            categoryId: inheritedAcquisition?.authority.categoryId,
+            workId: inheritedAcquisition?.authority.workId,
+            capability: crawler,
+            route: executionRoute,
+            ...(executionFallbackFor ? { fallbackFor: executionFallbackFor } : {}),
+            url: pantheonTelemetryUrl(rejected.sourceUrl),
+            status: 'skipped',
+            durationMs: 0,
+            reason: rejected.reason,
+          })}`);
+        }
+
+        const routeBudgetMs = Math.max(1, Math.min(requestedBudgetMs, orchestrationDeadlineAt - Date.now()));
+        // The canonical gateway is the sole retry authority. An outer retry
+        // loop multiplied attempts and could never improve a cached failure.
+        for (let attempt = 0; attempt < 1 && validTargets.length > 0; attempt++) {
+          attempts += 1;
+          try {
+            const routeDeadline = createPantheonDeadline(
+              Math.min(orchestrationDeadlineAt, Date.now() + routeBudgetMs),
+              orchestrationDeadline.signal,
+            );
+            try {
+              const executeSearch = () => this.search(validTargets, {
+                  ...options,
+                  timeout: routeBudgetMs,
+                  crawlers: [crawler],
+                  signal: routeDeadline.signal,
+                  strictErrors: true,
+                });
+              const searchPromise = inheritedAcquisition
+                ? runWithPantheonAcquisitionContext(
+                    {
+                      ...inheritedAcquisition.authority,
+                      workId: `${inheritedAcquisition.authority.workId}:crawler:${crawler}:attempt:${attempt + 1}`,
+                      capability: crawler,
+                      deadlineAt: Math.min(inheritedAcquisition.authority.deadlineAt, Date.now() + routeBudgetMs),
+                    },
+                    routeDeadline.signal,
+                    executeSearch,
+                  )
+                : executeSearch();
+              results = await racePantheonAbort(searchPromise, routeDeadline.signal);
+            } finally {
+              routeDeadline.dispose();
+            }
+            if (results.some(result => Boolean(result.content) && result.confidence > 0)) break;
+            const reportedError = results.find(result => result.metadata?.error || result.metadata?.failed);
+            if (reportedError) {
+              lastError = String(reportedError.metadata?.error || 'Crawler reported an acquisition failure');
+            }
+          } catch (error) {
+            lastError = error instanceof Error ? error.message : String(error);
+          }
+        }
+
+        const evidenceCount = results.filter(result => Boolean(result.content) && result.confidence > 0).length;
+        const durationMs = Date.now() - executionStartedAt;
+        const sourceOutcomes: CrawlerSourceOutcome[] = validTargets.map<CrawlerSourceOutcome>(target => {
+          const result = results.find(candidate => candidate.target === target);
+          return {
+            sourceUrl: target,
+            status: result && result.content && result.confidence > 0
+              ? 'completed_with_content'
+              : isPantheonCrawlerTimeout(lastError)
+                ? 'timed_out'
+                : lastError
+                  ? 'failed'
+                  : 'completed_no_evidence',
+            retrievedAt: new Date().toISOString(),
+            durationMs,
+            route: executionRoute,
+            ...(executionFallbackFor ? { fallbackFor: executionFallbackFor } : {}),
+            ...(lastError ? { error: lastError.slice(0, 300) } : {}),
+          };
+        }).concat(rejectedTargets.map(rejected => ({
+          sourceUrl: rejected.sourceUrl,
+          status: 'failed' as const,
+          retrievedAt: new Date().toISOString(),
+          durationMs: 0,
+          route: executionRoute,
+          ...(executionFallbackFor ? { fallbackFor: executionFallbackFor } : {}),
+          error: `Skipped before dispatch: ${rejected.reason}`.slice(0, 300),
+        })));
+        const rejectedSourceUrls = new Set(rejectedTargets.map(item => item.sourceUrl));
+        for (const outcome of sourceOutcomes.filter(item => !rejectedSourceUrls.has(item.sourceUrl))) {
+          const retrievalStatus = outcome.status;
+          console.log(`[PANTHEON][CRAWLER-URL] ${JSON.stringify({
+            event: 'outcome',
+            investigationId: inheritedAcquisition?.authority.investigationId,
+            categoryId: inheritedAcquisition?.authority.categoryId,
+            workId: inheritedAcquisition?.authority.workId,
+            capability: crawler,
+            route: executionRoute,
+            ...(executionFallbackFor ? { fallbackFor: executionFallbackFor } : {}),
+            url: pantheonTelemetryUrl(outcome.sourceUrl),
+            status: retrievalStatus,
+            evidenceStatus: outcome.status === 'completed_with_content' ? 'pending_validation' : 'not_applicable',
+            durationMs: outcome.durationMs,
+            ...(outcome.error ? { error: outcome.error } : {}),
+          })}`);
+        }
+        const audit: CrawlerExecutionAudit = {
+          crawler,
+          capabilityClass: 'primary',
+          status: evidenceCount > 0
+            ? 'completed_with_content'
+            : isPantheonCrawlerTimeout(lastError)
+              ? 'timed_out'
+              : lastError
+                ? 'failed'
+                : 'completed_no_evidence',
+          evidenceCount: 0,
+          contentCount: evidenceCount,
+          attempts,
+          targets: validTargets.length,
+          durationMs,
+          queueWaitMs,
+          sourceOutcomes,
+          route: executionRoute,
+          ...(executionFallbackFor ? { fallbackFor: executionFallbackFor } : {}),
+          ...(lastError ? { error: lastError.slice(0, 300) } : {}),
+        };
+
+        return { results, audit };
+      }, orchestrationDeadline.signal);
+    };
+    // Bounded capability swarm: the controller still owns admission, deadline,
+    // deduplication and crawler selection. Workers only execute already-selected
+    // crawler routes, preserving all existing per-crawler pool limits.
+    const swarmWorkerCount = Math.max(1, Math.min(PANTHEON_SWARM_ROUTE_LIMIT, crawlersToUse.length));
+    const swarmWorkers = Array.from({ length: swarmWorkerCount }, async () => {
+      const completed: Array<{ routeIndex: number; value: Awaited<ReturnType<typeof runSwarmRoute>> }> = [];
+      while (true) {
+        const routeIndex = nextSwarmRoute++;
+        if (routeIndex >= crawlersToUse.length) break;
+        throwIfPantheonAborted(orchestrationDeadline.signal);
+        completed.push({ routeIndex, value: await runSwarmRoute(crawlersToUse[routeIndex]) });
+      }
+      return completed;
+    });
+    const settledWorkers = await Promise.allSettled(swarmWorkers);
+    const settledExecutions: PromiseSettledResult<Awaited<ReturnType<typeof runSwarmRoute>>>[] =
+      crawlersToUse.map(() => ({ status: 'rejected', reason: new Error('Pantheon swarm route did not execute') }));
+    for (const worker of settledWorkers) {
+      if (worker.status !== 'fulfilled') continue;
+      for (const execution of worker.value) {
+        settledExecutions[execution.routeIndex] = { status: 'fulfilled', value: execution.value };
+      }
+    }
+    orchestrationDeadline.dispose();
+    const executions = settledExecutions.map((execution, routeIndex) => {
+      if (execution.status === 'fulfilled') return execution.value;
+      const crawler = crawlersToUse[routeIndex];
+      const message = execution.reason instanceof Error ? execution.reason.message : String(execution.reason);
+      const status = isPantheonCrawlerTimeout(execution.reason) ? 'timed_out' as const : 'failed' as const;
+      const retrievedAt = new Date().toISOString();
+      const sourceOutcomes: CrawlerSourceOutcome[] = [
+        ...validTargets.map(sourceUrl => ({
+          sourceUrl,
+          status,
+          retrievedAt,
+          durationMs: 0,
+          error: message.slice(0, 300),
+          route: executionRoute,
+          ...(executionFallbackFor ? { fallbackFor: executionFallbackFor } : {}),
+        })),
+        ...rejectedTargets.map(rejected => ({
+          sourceUrl: rejected.sourceUrl,
+          status: 'failed' as const,
+          retrievedAt,
+          durationMs: 0,
+          error: `Skipped before dispatch: ${rejected.reason}`.slice(0, 300),
+          route: executionRoute,
+          ...(executionFallbackFor ? { fallbackFor: executionFallbackFor } : {}),
+        })),
+      ];
+      return {
+        results: [] as CrawlerResult[],
+        audit: {
+          crawler,
+          capabilityClass: 'primary' as const,
+          status,
+          evidenceCount: 0,
+          attempts: 0,
+          targets: validTargets.length,
+          durationMs: 0,
+          queueWaitMs: 0,
+          sourceOutcomes,
+          route: executionRoute,
+          ...(executionFallbackFor ? { fallbackFor: executionFallbackFor } : {}),
+          error: message.slice(0, 300),
+        },
+      };
+    });
+
+    return {
+      results: executions.flatMap(execution => execution.results),
+      audit: executions.map(execution => execution.audit),
+    };
+  }
+
+  async searchAllIsolated(targets: string[], options: PantheonSearchOptions): Promise<CrawlerResult[]> {
+    return (await this.searchAllIsolatedWithAudit(targets, options)).results;
+  }
+
+  /**
+   * Get appropriate crawlers based on search depth
+   */
+  private getCrawlersForDepth(depth: 1 | 2 | 3): PantheonPrimaryCrawlerId[] {
+    switch (depth) {
+      case 1:
+        return ['startrek'];
+      case 2:
+        return ['startrek', 'birdofprey', 'sixdegrees'];
+      case 3:
+        return ['startrek', 'birdofprey', 'sixdegrees', 'cerberus', 'blizzard', 'lich'];
+      default:
+        return ['startrek'];
+    }
+  }
+  
+  /**
+   * Execute avalanche mode (cascading data retrieval)
+   */
+  async avalanche(initialTarget: string): Promise<CrawlerResult[]> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+    
+    if (!this.blizzard) {
+      throw new Error('Blizzard crawler not initialized');
+    }
+    
+    console.log('[PANTHEON] Triggering AVALANCHE mode...');
+    const results = await this.blizzard.triggerAvalanche(initialTarget);
+    
+    return results.map(r => ({
+      crawler: 'blizzard-avalanche',
+      target: r.target,
+      content: r.content || '',
+      confidence: r.confidence || 0.8,
+      timestamp: r.timestamp,
+      metadata: { mode: 'avalanche' },
+    }));
+  }
+  
+  /**
+   * Get crawler system status
+   */
+  getStatus(): {
+    initialized: boolean;
+    systemStatus: ReturnType<typeof getSystemStatus>;
+    crawlerPool: ReturnType<typeof getPantheonCrawlerPoolActivity>;
+    crawlers: Record<string, { available: boolean; status?: any }>;
+  } {
+    return {
+      initialized: this.initialized,
+      systemStatus: getSystemStatus(),
+      crawlerPool: getPantheonCrawlerPoolActivity(),
+      crawlers: {
+        blizzard: { available: !!this.blizzard },
+        cerberus: { available: !!this.cerberus, status: this.cerberus?.getMetrics() },
+        lich: { available: !!this.lich, status: this.lich?.getStatus() },
+        startrek: { available: !!this.startrek },
+        birdofprey: { available: !!this.birdofprey },
+        sixdegrees: { available: !!this.sixdegrees },
+      },
+    };
+  }
+}
+
+// ==================== SINGLETON INSTANCE ====================
+
+export const pantheonOrchestrator = new PantheonCrawlerOrchestrator();
+
+// ==================== CONVENIENCE FUNCTIONS ====================
+
+/**
+ * Quick PANTHEON search with automatic initialization
+ */
+export async function pantheonSearch(
+  targets: string[],
+  depth: 1 | 2 | 3 = 2
+): Promise<CrawlerResult[]> {
+  return pantheonOrchestrator.search(targets, { depth });
+}
+
+/**
+ * Check if PANTHEON can be activated
+ */
+export function canActivatePantheon(): { available: boolean; reason?: string } {
+  if (systemState.cryptocrawlerActive) {
+    return { 
+      available: false, 
+      reason: 'Cryptocrawler system is currently active. PANTHEON will be available when cryptocrawler completes.' 
+    };
+  }
+  
+  if (systemState.lockedBy === 'cryptocrawler') {
+    const remainingMs = (systemState.lockExpiry || 0) - Date.now();
+    if (remainingMs > 0) {
+      return { 
+        available: false, 
+        reason: `Cryptocrawler holds system lock for ${Math.ceil(remainingMs / 1000)} more seconds.` 
+      };
+    }
+  }
+  
+  return { available: true };
+}
+
+/**
+ * Notify PANTHEON that cryptocrawler is starting
+ * This will make PANTHEON unavailable
+ */
+export function notifyCryptocrawlerStarting(): boolean {
+  if (systemState.panteonActive) {
+    console.log('[SYSTEM] Cannot start cryptocrawler - PANTHEON is active');
+    return false;
+  }
+  
+  return acquireSystemLock('cryptocrawler', 3600000); // 1 hour lock for cryptocrawler
+}
+
+/**
+ * Notify PANTHEON that cryptocrawler has completed
+ * This will make PANTHEON available again
+ */
+export function notifyCryptocrawlerComplete(): void {
+  releaseSystemLock('cryptocrawler');
+  console.log('[SYSTEM] Cryptocrawler complete - PANTHEON is now available');
+}
+
+console.log('[PANTHEON] Crawler Orchestrator module loaded');
+console.log('[PANTHEON] System status:', getSystemStatus().currentMode);

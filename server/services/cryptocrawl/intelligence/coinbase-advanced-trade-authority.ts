@@ -1,0 +1,463 @@
+import {
+  createPrivateKey,
+  randomBytes,
+  sign as cryptoSign,
+  type KeyObject,
+} from 'node:crypto';
+import logger from '../../../logger.js';
+
+const COINBASE_HOST = 'api.coinbase.com';
+const COINBASE_ORIGIN = 'https://api.coinbase.com';
+const REQUEST_TIMEOUT_MS = Math.max(3_000, Number(process.env.CRYPTO_COINBASE_PRIVATE_TIMEOUT_MS || 12_000));
+const PERMISSION_CACHE_MS = Math.max(30_000, Number(process.env.CRYPTO_COINBASE_PERMISSION_CACHE_MS || 300_000));
+const AUTH_FAILURE_COOLDOWN_MS = Math.max(
+  5_000,
+  Math.min(300_000, Number(process.env.CRYPTO_COINBASE_AUTH_FAILURE_COOLDOWN_MS || 60_000)),
+);
+const RATE_RETRY_BASE_MS = Math.max(100, Math.min(10_000, Number(process.env.CRYPTO_COINBASE_RATE_RETRY_BASE_MS || 500)));
+const RATE_RETRY_MAX_MS = Math.max(RATE_RETRY_BASE_MS, Math.min(60_000, Number(process.env.CRYPTO_COINBASE_RATE_RETRY_MAX_MS || 15_000)));
+const RATE_MAX_READ_RETRIES = Math.max(0, Math.min(5, Math.floor(Number(process.env.CRYPTO_COINBASE_RATE_MAX_READ_RETRIES || 3))));
+
+export interface CoinbaseKeyPermissions {
+  canView: boolean;
+  canTrade: boolean;
+  canTransfer: boolean;
+  canReceive: boolean;
+  portfolioUuid: string | null;
+  observedAt: number;
+}
+
+export interface CoinbasePrivateAuthoritySnapshot {
+  credentialsVisible: boolean;
+  credentialSource: string | null;
+  permissionObservedAt: number | null;
+  canView: boolean | null;
+  canTrade: boolean | null;
+  requestCount: number;
+  lastRequestAt: number | null;
+  authAlgorithm: 'ES256' | 'EdDSA' | null;
+  authFailureCount: number;
+  lastAuthFailureAt: number | null;
+  authCooldownUntil: number | null;
+  authCircuitOpen: boolean;
+  rateLimitCount: number;
+  rateRetryCount: number;
+  rateCooldownUntil: number | null;
+  rateCircuitOpen: boolean;
+}
+
+interface CoinbaseCredentialPair {
+  keyName: string;
+  keySecret: string;
+  source: string;
+}
+
+export class CoinbasePrivateAuthError extends Error {
+  constructor(readonly status: 401 | 403, message?: string) {
+    super(message || `Coinbase private authentication failed (${status})`);
+    this.name = 'CoinbasePrivateAuthError';
+  }
+}
+
+export class CoinbaseAuthCircuitOpenError extends Error {
+  constructor(readonly retryAt: number) {
+    super(`Coinbase private authentication circuit is temporarily open until ${new Date(retryAt).toISOString()}`);
+    this.name = 'CoinbaseAuthCircuitOpenError';
+  }
+}
+
+export class CoinbaseRateLimitError extends Error {
+  constructor(readonly retryAt: number, readonly path: string) {
+    super(`Coinbase private rate limit is active for ${path} until ${new Date(retryAt).toISOString()}`);
+    this.name = 'CoinbaseRateLimitError';
+  }
+}
+
+let permissionsCache: { expiresAt: number; value: CoinbaseKeyPermissions } | null = null;
+let permissionsInFlight: Promise<CoinbaseKeyPermissions> | null = null;
+let requestCount = 0;
+let lastRequestAt: number | null = null;
+let lastAuthAlgorithm: 'ES256' | 'EdDSA' | null = null;
+let authFailureCount = 0;
+let authRecoveryLoggedFailureCount = 0;
+let lastAuthFailureAt: number | null = null;
+let authCooldownUntil: number | null = null;
+let rateLimitCount = 0;
+let rateRetryCount = 0;
+let rateCooldownUntil: number | null = null;
+
+function normalizeCredential(raw: string | undefined): string | null {
+  if (!raw) return null;
+  let value = raw.trim();
+  if (value.length >= 2) {
+    const first = value[0];
+    const last = value[value.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) value = value.slice(1, -1).trim();
+  }
+  return value || null;
+}
+
+function normalizeCoinbaseSecret(raw: string | undefined): string | null {
+  const value = normalizeCredential(raw);
+  return value ? value.replace(/\\n/g, '\n') : null;
+}
+
+function coinbaseCredentialPairs(): CoinbaseCredentialPair[] {
+  const candidates: Array<{ source: string; keyName: string | null; keySecret: string | null }> = [
+    {
+      source: 'COINBASE_KEY_NAME/COINBASE_KEY_SECRET',
+      keyName: normalizeCredential(process.env.COINBASE_KEY_NAME),
+      keySecret: normalizeCoinbaseSecret(process.env.COINBASE_KEY_SECRET),
+    },
+    {
+      source: 'CDP_API_KEY_NAME/CDP_API_KEY_SECRET',
+      keyName: normalizeCredential(process.env.CDP_API_KEY_NAME),
+      keySecret: normalizeCoinbaseSecret(process.env.CDP_API_KEY_SECRET),
+    },
+    {
+      source: 'CDP_API_KEY_NAME/CDP_API_KEY_PRIVATE_KEY',
+      keyName: normalizeCredential(process.env.CDP_API_KEY_NAME),
+      keySecret: normalizeCoinbaseSecret(process.env.CDP_API_KEY_PRIVATE_KEY),
+    },
+    {
+      source: 'KEY_NAME/KEY_SECRET',
+      keyName: normalizeCredential(process.env.KEY_NAME),
+      keySecret: normalizeCoinbaseSecret(process.env.KEY_SECRET),
+    },
+    {
+      source: 'COINBASE_API_KEY/COINBASE_API_SECRET',
+      keyName: normalizeCredential(process.env.COINBASE_API_KEY),
+      keySecret: normalizeCoinbaseSecret(process.env.COINBASE_API_SECRET),
+    },
+    {
+      source: 'CDP_API_KEY_ID/CDP_API_KEY_SECRET',
+      keyName: normalizeCredential(process.env.CDP_API_KEY_ID),
+      keySecret: normalizeCoinbaseSecret(process.env.CDP_API_KEY_SECRET),
+    },
+    {
+      source: 'CDP_API_KEY_ID/CDP_API_KEY_PRIVATE_KEY',
+      keyName: normalizeCredential(process.env.CDP_API_KEY_ID),
+      keySecret: normalizeCoinbaseSecret(process.env.CDP_API_KEY_PRIVATE_KEY),
+    },
+  ];
+
+  return candidates
+    .filter((candidate): candidate is CoinbaseCredentialPair => Boolean(candidate.keyName && candidate.keySecret))
+    .map(candidate => ({ keyName: candidate.keyName, keySecret: candidate.keySecret, source: candidate.source }));
+}
+
+function selectedCoinbaseCredentials(): CoinbaseCredentialPair | null {
+  const completePairs = coinbaseCredentialPairs();
+  return completePairs.find(pair => pair.keyName.includes('/apiKeys/')) || null;
+}
+
+export function hasCoinbaseAdvancedTradeCredentials(): boolean {
+  return selectedCoinbaseCredentials() !== null;
+}
+
+function requireCoinbaseCredentials(): CoinbaseCredentialPair {
+  const selected = selectedCoinbaseCredentials();
+  if (selected) return selected;
+
+  const completePairs = coinbaseCredentialPairs();
+  if (completePairs.length > 0) {
+    throw new Error('Coinbase Advanced Trade credentials are paired but no Key Name has the documented organizations/{org_id}/apiKeys/{key_id} form; refusing ambiguous authentication');
+  }
+  throw new Error('Coinbase Advanced Trade credentials are not visible as a complete supported name/secret pair; do not mix a Key Name from one environment-variable family with a secret from another');
+}
+
+function base64Url(value: Buffer | string): string {
+  return Buffer.from(value).toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+function privateKeyFromSecret(secret: string): { key: KeyObject; algorithm: 'ES256' | 'EdDSA' } {
+  if (secret.includes('BEGIN')) {
+    const key = createPrivateKey(secret);
+    if (key.asymmetricKeyType !== 'ec') {
+      throw new Error(`Coinbase PEM secret must be an EC private key for ES256; received ${key.asymmetricKeyType || 'unknown'}`);
+    }
+    return { key, algorithm: 'ES256' };
+  }
+
+  const decoded = Buffer.from(secret, 'base64');
+  if (decoded.length !== 64) {
+    throw new Error(`Coinbase Ed25519 API secret must decode to exactly 64 bytes; received ${decoded.length}`);
+  }
+  const seed = decoded.subarray(0, 32);
+  const prefix = Buffer.from('302e020100300506032b657004220420', 'hex');
+  const key = createPrivateKey({ key: Buffer.concat([prefix, seed]), format: 'der', type: 'pkcs8' });
+  return { key, algorithm: 'EdDSA' };
+}
+
+function signCoinbaseJwt(payload: Record<string, unknown>, nowMs: number): string {
+  const { keyName, keySecret } = requireCoinbaseCredentials();
+  const { key, algorithm } = privateKeyFromSecret(keySecret);
+  const now = Math.floor(nowMs / 1000);
+  const header = {
+    typ: 'JWT',
+    alg: algorithm,
+    kid: keyName,
+    nonce: randomBytes(16).toString('hex'),
+  };
+  const signingInput = `${base64Url(JSON.stringify(header))}.${base64Url(JSON.stringify({
+    sub: keyName,
+    iss: 'cdp',
+    aud: ['cdp_service'],
+    nbf: now,
+    exp: now + 120,
+    ...payload,
+  }))}`;
+  const signature = algorithm === 'ES256'
+    ? cryptoSign('sha256', Buffer.from(signingInput), { key, dsaEncoding: 'ieee-p1363' })
+    : cryptoSign(null, Buffer.from(signingInput), key);
+  lastAuthAlgorithm = algorithm;
+  return `${signingInput}.${base64Url(signature)}`;
+}
+
+export function createCoinbaseRestJwt(
+  methodInput: string,
+  requestPath: string,
+  nowMs: number = Date.now(),
+): string {
+  const method = methodInput.trim().toUpperCase();
+  if (!method || !requestPath.startsWith('/')) throw new Error('Coinbase JWT requires an HTTP method and absolute request path');
+  return signCoinbaseJwt({ uri: `${method} ${COINBASE_HOST}${requestPath}` }, nowMs);
+}
+
+/**
+ * Coinbase Advanced Trade WebSocket JWTs intentionally omit the REST `uri`
+ * claim. Keeping both token forms in this one credential/signing authority avoids
+ * a second signer while allowing the authenticated user-order stream to remain a
+ * read-only execution-state feedback surface.
+ */
+export function createCoinbaseWebSocketJwt(nowMs: number = Date.now()): string {
+  return signCoinbaseJwt({}, nowMs);
+}
+
+function appendQuery(url: URL, query: Record<string, string | string[]> | undefined): void {
+  if (!query) return;
+  for (const [key, raw] of Object.entries(query)) {
+    if (Array.isArray(raw)) raw.forEach(value => url.searchParams.append(key, value));
+    else url.searchParams.set(key, raw);
+  }
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return ms > 0 ? new Promise(resolve => setTimeout(resolve, ms)) : Promise.resolve();
+}
+
+function assertCoinbaseAuthCircuitClosed(now = Date.now()): void {
+  if (authCooldownUntil !== null && authCooldownUntil > now) {
+    throw new CoinbaseAuthCircuitOpenError(authCooldownUntil);
+  }
+  if (authCooldownUntil !== null && authCooldownUntil <= now) authCooldownUntil = null;
+}
+
+function rateLimitDelayMs(response: Response, attempt: number): number {
+  const retryAfter = response.headers.get('retry-after');
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(RATE_RETRY_MAX_MS, Math.max(50, Math.ceil(seconds * 1_000)));
+    const parsedDate = Date.parse(retryAfter);
+    if (Number.isFinite(parsedDate)) return Math.min(RATE_RETRY_MAX_MS, Math.max(50, parsedDate - Date.now()));
+  }
+  const ceiling = Math.min(RATE_RETRY_MAX_MS, RATE_RETRY_BASE_MS * (2 ** Math.max(0, attempt)));
+  return Math.max(50, Math.floor(Math.random() * Math.max(51, ceiling)));
+}
+
+async function waitForCoinbaseRateCooldown(): Promise<void> {
+  const now = Date.now();
+  if (rateCooldownUntil === null || rateCooldownUntil <= now) {
+    if (rateCooldownUntil !== null && rateCooldownUntil <= now) rateCooldownUntil = null;
+    return;
+  }
+  await sleep(rateCooldownUntil - now);
+}
+
+function recordCoinbaseRateLimit(path: string, response: Response, attempt: number): number {
+  const delayMs = rateLimitDelayMs(response, attempt);
+  rateLimitCount += 1;
+  rateCooldownUntil = Math.max(rateCooldownUntil || 0, Date.now() + delayMs);
+  logger.warn('[Coinbase] Private API rate limit observed; bounded cooldown applied', {
+    component: 'CoinbaseAdvancedTradeAuthority',
+    path,
+    status: response.status,
+    retryDelayMs: delayMs,
+    rateLimitCount,
+    automaticWriteRetryAllowed: false,
+  });
+  return delayMs;
+}
+
+function recordCoinbaseAuthFailure(status: 401 | 403): CoinbasePrivateAuthError {
+  const now = Date.now();
+  authFailureCount += 1;
+  lastAuthFailureAt = now;
+  authCooldownUntil = now + AUTH_FAILURE_COOLDOWN_MS;
+  permissionsCache = null;
+  const credentialSource = selectedCoinbaseCredentials()?.source || null;
+  logger.warn('[Coinbase] Private authentication circuit opened after authoritative rejection', {
+    component: 'CoinbaseAdvancedTradeAuthority',
+    status,
+    credentialSource,
+    authFailureCount,
+    cooldownMs: AUTH_FAILURE_COOLDOWN_MS,
+    retryAt: authCooldownUntil,
+  });
+  return new CoinbasePrivateAuthError(
+    status,
+    `Coinbase private authentication failed (${status}); verify the exact paired credential source ${credentialSource || 'unknown'}, required permissions, and any configured IP allowlist`,
+  );
+}
+
+function recordCoinbaseAuthenticatedSuccess(): void {
+  if (authFailureCount > authRecoveryLoggedFailureCount) {
+    authRecoveryLoggedFailureCount = authFailureCount;
+    logger.info('[Coinbase] Private authentication circuit recovered after authenticated success', {
+      component: 'CoinbaseAdvancedTradeAuthority',
+      credentialSource: selectedCoinbaseCredentials()?.source || null,
+      priorAuthFailures: authFailureCount,
+    });
+  }
+  authCooldownUntil = null;
+}
+
+export async function coinbasePrivateRequest(
+  path: string,
+  method: 'GET' | 'POST',
+  options: {
+    query?: Record<string, string | string[]>;
+    body?: unknown;
+    timeoutMs?: number;
+  } = {},
+): Promise<any> {
+  if (!path.startsWith('/api/v3/brokerage/')) throw new Error(`Unsupported Coinbase private path: ${path}`);
+  assertCoinbaseAuthCircuitClosed();
+
+  const maxAttempts = method === 'GET' ? RATE_MAX_READ_RETRIES + 1 : 1;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    await waitForCoinbaseRateCooldown();
+    assertCoinbaseAuthCircuitClosed();
+
+    const url = new URL(path, COINBASE_ORIGIN);
+    appendQuery(url, options.query);
+    const jwt = createCoinbaseRestJwt(method, path);
+    const body = method === 'POST' && options.body !== undefined ? JSON.stringify(options.body) : undefined;
+    const response = await fetchWithTimeout(url.toString(), {
+      method,
+      headers: {
+        accept: 'application/json',
+        Authorization: `Bearer ${jwt}`,
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body,
+    }, options.timeoutMs ?? REQUEST_TIMEOUT_MS);
+
+    if (response.status === 429) {
+      const delayMs = recordCoinbaseRateLimit(path, response, attempt);
+      if (method === 'GET' && attempt + 1 < maxAttempts) {
+        rateRetryCount += 1;
+        await sleep(delayMs);
+        continue;
+      }
+      throw new CoinbaseRateLimitError(Date.now() + delayMs, path);
+    }
+
+    const text = await response.text();
+    let payload: any;
+    try {
+      payload = text ? JSON.parse(text) : {};
+    } catch {
+      if (response.status === 401 || response.status === 403) {
+        throw recordCoinbaseAuthFailure(response.status);
+      }
+      throw new Error(`Coinbase private endpoint returned non-JSON (${response.status})`);
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw recordCoinbaseAuthFailure(response.status);
+    }
+    if (!response.ok || payload?.error) {
+      const code = payload?.error_response?.error || payload?.error || payload?.code || response.status;
+      const message = payload?.error_response?.message || payload?.message || payload?.error_details || '';
+      throw new Error(`Coinbase private endpoint failed (${response.status}) code=${String(code)}${message ? ` message=${String(message)}` : ''}`);
+    }
+    recordCoinbaseAuthenticatedSuccess();
+    rateCooldownUntil = null;
+    requestCount += 1;
+    lastRequestAt = Date.now();
+    return payload;
+  }
+
+  throw new Error(`Coinbase private request exhausted bounded retry budget for ${path}`);
+}
+
+export async function getCoinbaseKeyPermissions(forceRefresh = false): Promise<CoinbaseKeyPermissions> {
+  if (!forceRefresh && permissionsCache && permissionsCache.expiresAt > Date.now()) return { ...permissionsCache.value };
+  if (permissionsInFlight) return { ...(await permissionsInFlight) };
+
+  permissionsInFlight = (async () => {
+    const payload = await coinbasePrivateRequest('/api/v3/brokerage/key_permissions', 'GET');
+    const value: CoinbaseKeyPermissions = {
+      canView: payload?.can_view === true,
+      canTrade: payload?.can_trade === true,
+      canTransfer: payload?.can_transfer === true,
+      canReceive: payload?.can_receive === true,
+      portfolioUuid: typeof payload?.portfolio_uuid === 'string' && payload.portfolio_uuid.trim()
+        ? payload.portfolio_uuid.trim()
+        : null,
+      observedAt: Date.now(),
+    };
+    permissionsCache = { value, expiresAt: Date.now() + PERMISSION_CACHE_MS };
+    logger.info('[Coinbase] Advanced Trade API-key permissions verified', {
+      component: 'CoinbaseAdvancedTradeAuthority',
+      credentialSource: selectedCoinbaseCredentials()?.source || null,
+      canView: value.canView,
+      canTrade: value.canTrade,
+      canTransfer: value.canTransfer,
+      portfolioBound: Boolean(value.portfolioUuid),
+    });
+    return value;
+  })().finally(() => { permissionsInFlight = null; });
+
+  return { ...(await permissionsInFlight) };
+}
+
+export async function assertCoinbaseSpotTradeReady(): Promise<CoinbaseKeyPermissions> {
+  const permissions = await getCoinbaseKeyPermissions();
+  if (!permissions.canView) throw new Error('Coinbase API key does not have view permission required for fees, balances, and settlement verification');
+  if (!permissions.canTrade) throw new Error('Coinbase API key does not have trade permission required for live execution');
+  return permissions;
+}
+
+export function getCoinbasePrivateAuthoritySnapshot(): CoinbasePrivateAuthoritySnapshot {
+  const now = Date.now();
+  const selected = selectedCoinbaseCredentials();
+  return {
+    credentialsVisible: selected !== null,
+    credentialSource: selected?.source || null,
+    permissionObservedAt: permissionsCache?.value.observedAt || null,
+    canView: permissionsCache?.value.canView ?? null,
+    canTrade: permissionsCache?.value.canTrade ?? null,
+    requestCount,
+    lastRequestAt,
+    authAlgorithm: lastAuthAlgorithm,
+    authFailureCount,
+    lastAuthFailureAt,
+    authCooldownUntil: authCooldownUntil && authCooldownUntil > now ? authCooldownUntil : null,
+    authCircuitOpen: Boolean(authCooldownUntil && authCooldownUntil > now),
+    rateLimitCount,
+    rateRetryCount,
+    rateCooldownUntil: rateCooldownUntil && rateCooldownUntil > now ? rateCooldownUntil : null,
+    rateCircuitOpen: Boolean(rateCooldownUntil && rateCooldownUntil > now),
+  };
+}

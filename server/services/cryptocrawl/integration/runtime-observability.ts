@@ -1,0 +1,517 @@
+import logger from '../../../logger.js';
+import { multiProviderRpcManager, type SupportedChain } from '../api/blockchain-providers.js';
+import { getVenueCapabilities } from '../discovery/venue-capability-registry.js';
+import { measuredOpportunityGraph } from '../discovery/opportunity-graph.js';
+import { multiTopologyDiscoveryController } from '../discovery/multi-topology-discovery-controller.js';
+import { measuredCandidateRegistry } from '../discovery/measured-candidate-registry.js';
+import { getMempoolCapabilities } from '../discovery/mempool-capability-registry.js';
+import { getLatestCexEconomicBarrier } from '../discovery/cex-economic-barrier.js';
+import { canonicalExecutionScheduler } from '../execution/canonical-execution-scheduler.js';
+import { cexInventoryLedger } from '../execution/cex-inventory-ledger.js';
+import { inventoryRebalancer } from '../execution/inventory-rebalancer.js';
+import { canonicalIntelligenceOutbox } from '../intelligence/canonical-intelligence-outbox.js';
+import { kalshiCredentialsPresent } from '../intelligence/kalshi-authenticated-authority.js';
+import { marketDataProviders } from '../intelligence/market-data-providers.js';
+import { canonicalOpportunityState } from '../intelligence/canonical-opportunity-state.js';
+import { stageManager } from '../governance/stage-management.js';
+import { workloadRouter } from '../../computationalBeam/workloadRouter.js';
+import { getMeasuredEvolutionMetrics } from '../evolution/measured-execution-feedback.js';
+import { monteCarloCalibrationStore } from '../validation/monte-carlo-calibration-store.js';
+import { orderBookEvolutionStore } from '../validation/order-book-evolution-store.js';
+import { getCryptaraSupabaseCompSwitchSnapshot } from './cryptara-supabase-comp-switch.js';
+import { resolveCoinStatsEnvironment } from '../runtime/environment-contract.js';
+import { getPerformanceEvidenceContract } from '../runtime/performance-evidence-contract.js';
+import { getCryptoCrawlerRuntimeAttestation, isRuntimeIdentitySafe } from '../runtime/runtime-attestation.js';
+import { computeCryptoRuntimeReadiness } from '../runtime/readiness-policy.js';
+import { runtimeInvariantMonitor } from '../runtime/runtime-invariant-monitor.js';
+import { getLatestProvenZeroCapitalGasFundingDecisions } from '../runtime/system-owned-gas-funding-proof-wiring.js';
+
+const CHAINS: SupportedChain[] = [
+  'ethereum',
+  'polygon',
+  'arbitrum',
+  'optimism',
+  'base',
+  'avalanche',
+  'bsc',
+];
+
+let heartbeatTimer: NodeJS.Timeout | null = null;
+let heartbeatRunning = false;
+
+function blockchainProviderSnapshot() {
+  return CHAINS.map(chain => ({
+    chain,
+    providers: multiProviderRpcManager.getHealth(chain).map(observation => ({
+      provider: observation.provider,
+      http: observation.http.success ? 'healthy' : observation.http.state,
+      lastError: observation.http.lastError || null,
+    })),
+  }));
+}
+
+function executionConfiguration() {
+  const krakenConfigured = !!(process.env.KRAKEN_API_KEY?.trim() && process.env.KRAKEN_API_SECRET?.trim());
+  const okxConfigured = !!(
+    process.env.OKX_API_KEY?.trim()
+    && process.env.OKX_API_SECRET?.trim()
+    && process.env.OKX_API_PASSPHRASE?.trim()
+  );
+  const coinbaseConfigured = !!(
+    (process.env.COINBASE_API_KEY?.trim() || process.env.COINBASE_KEY_NAME?.trim() || process.env.CDP_API_KEY_NAME?.trim())
+    && (process.env.COINBASE_API_SECRET?.trim() || process.env.COINBASE_KEY_SECRET?.trim() || process.env.CDP_API_KEY_SECRET?.trim())
+  );
+  const kalshiEventConfigured = kalshiCredentialsPresent('event');
+  const kalshiPerpsConfigured = kalshiCredentialsPresent('perps');
+  const kalshiExecutionConfigured = kalshiEventConfigured || kalshiPerpsConfigured;
+  const configuredVenueCount = [coinbaseConfigured, krakenConfigured, okxConfigured].filter(Boolean).length;
+  const noExecutionGuardEnabled = process.env.NO_EXECUTION === 'true';
+  const liveExecutionEnabled = process.env.CRYPTO_ARBITRAGE_LIVE_EXECUTION === 'true';
+  const liveExecutionConfirmed = process.env.CRYPTO_ARBITRAGE_LIVE_CONFIRMATION === 'I_ACCEPT_LIVE_ORDER_RISK';
+  return {
+    coinbaseConfigured,
+    krakenConfigured,
+    okxConfigured,
+    kalshiEventConfigured,
+    kalshiPerpsConfigured,
+    kalshiExecutionConfigured,
+    configuredVenueCount,
+    noExecutionGuardEnabled,
+    liveExecutionEnabled,
+    liveExecutionConfirmed,
+    // A cross-venue CEX route needs at least two configured accounts. Actual
+    // permissions, authenticated fees, product depth and inventory still gate the
+    // individual plan; configuration alone never makes TRADING_READY true.
+    centralizedExecutionConfigured: configuredVenueCount >= 2,
+  };
+}
+
+function summarizeMultiTopologyCycle(
+  cycle: ReturnType<typeof multiTopologyDiscoveryController.getLatestCycle>,
+) {
+  if (!cycle) return null;
+
+  let admitted = 0;
+  const blockedReasonCounts: Record<string, number> = {};
+  for (const decision of cycle.routedOpportunities) {
+    if (decision.admitted) admitted += 1;
+    for (const reason of decision.reasons) {
+      if (!reason.startsWith('blocked:')) continue;
+      blockedReasonCounts[reason] = (blockedReasonCounts[reason] || 0) + 1;
+    }
+  }
+
+  return {
+    cycleId: cycle.cycleId,
+    startedAt: cycle.startedAt,
+    completedAt: cycle.completedAt,
+    candidateCounts: {
+      cex: cycle.cexCandidates,
+      dex: cycle.dexCandidates,
+      crossChain: cycle.crossChainCandidates,
+      mempool: cycle.mempoolCandidates,
+      liquidation: cycle.liquidationCandidates,
+      maker: cycle.makerCandidates,
+      funding: cycle.fundingCandidates,
+    },
+    durationMsByTopology: cycle.durationMsByTopology,
+    scanPriorities: cycle.scanPriorities,
+    admissionPolicy: cycle.admissionPolicy,
+    assemblyPolicy: cycle.assemblyPolicy,
+    routedOpportunities: {
+      evaluated: cycle.routedOpportunities.length,
+      admitted,
+      blocked: cycle.routedOpportunities.length - admitted,
+      blockedReasonCounts: Object.fromEntries(
+        Object.entries(blockedReasonCounts)
+          .sort((left, right) => right[1] - left[1])
+          .slice(0, 24),
+      ),
+      highestScoring: cycle.routedOpportunities.slice(0, 12).map(decision => ({
+        opportunityId: decision.opportunityId,
+        topology: decision.topology,
+        path: decision.path,
+        admitted: decision.admitted,
+        profitabilityScore: decision.score.profitabilityScore,
+        executionRisk: decision.score.executionRisk,
+        confidenceLevel: decision.score.confidenceLevel,
+        reasons: decision.reasons.filter(reason => reason.startsWith('blocked:')).slice(0, 8),
+      })),
+    },
+    compositePlan: cycle.compositePlan ? {
+      planId: cycle.compositePlan.planId,
+      selectedLegCount: cycle.compositePlan.selectedLegCount,
+      selectedExecutionPath: cycle.compositePlan.selectedExecutionPath,
+      executionMode: cycle.compositePlan.executionMode,
+      notionalWeightedNetProfitBps: cycle.compositePlan.notionalWeightedNetProfitBps,
+      sharedPrincipalStackedBps: cycle.compositePlan.sharedPrincipalStackedBps,
+      exactCompositeSimulation: cycle.compositePlan.exactCompositeSimulation,
+    } : null,
+    registry: cycle.registry,
+    errors: cycle.errors.slice(0, 12),
+    fullCandidateDecisionsLogged: false,
+  };
+}
+
+export async function emitCryptoRuntimeHeartbeat(): Promise<void> {
+  if (heartbeatRunning) return;
+  heartbeatRunning = true;
+  try {
+    const supabasePath = getCryptaraSupabaseCompSwitchSnapshot();
+    // In comp mode the outbox worker already refreshes its metrics at the slower,
+    // pressure-aware cadence. Reuse that local truth here instead of adding an
+    // observability-only aggregate query every heartbeat.
+    const intelligenceOutbox = supabasePath.path === 'comp'
+      ? canonicalIntelligenceOutbox.getMetrics()
+      : await canonicalIntelligenceOutbox.refreshMetrics();
+    const beam = workloadRouter.getSystemStatus();
+    const recentMinute = canonicalOpportunityState.getMetrics(60_000);
+    const recentHour = canonicalOpportunityState.getMetrics(60 * 60_000);
+    const recentSnapshots = canonicalOpportunityState.getRecent(512);
+    const invariantMonitor = runtimeInvariantMonitor.scan(recentSnapshots);
+    const latest = canonicalOpportunityState.getLatest();
+    const graph = measuredOpportunityGraph.getLatestCycle();
+    const multiTopology = multiTopologyDiscoveryController.getLatestCycle();
+    const candidateMetrics = measuredCandidateRegistry.getMetrics(60_000);
+    const economicBarrier = getLatestCexEconomicBarrier();
+    const scheduler = canonicalExecutionScheduler.getStats();
+    const stage = stageManager.getState();
+    const measured = getMeasuredEvolutionMetrics();
+    const performanceTruth = getPerformanceEvidenceContract();
+    const runtime = getCryptoCrawlerRuntimeAttestation();
+    const execution = executionConfiguration();
+    const providerStatuses = marketDataProviders.getProviderStatuses();
+    const usableMarketUniverseProviders = providerStatuses.filter(status =>
+      status.provider !== '0x' && ['live', 'cached', 'stale'].includes(status.state),
+    );
+    // Aggregator feeds expand/rank the universe but are not the sole authority for
+    // core CEX discovery. Fresh directly-evaluated CEX market evidence is also a
+    // valid core data proof, so a CoinGecko 429 can never globally poison discovery.
+    const directCexMarketEvidenceReady = !!graph && graph.evaluatedSymbols > 0;
+    const coreMarketDataReady = usableMarketUniverseProviders.length > 0 || directCexMarketEvidenceReady;
+    const coinStatsEnvironment = resolveCoinStatsEnvironment();
+    const rpcSnapshot = blockchainProviderSnapshot();
+    // A degraded provider is intentionally still operational in the canonical RPC
+    // manager until its route-local failure threshold/cooldown is reached. Readiness
+    // must not globally erase that usable path merely because it is not pristine.
+    const criticalRpcReady = rpcSnapshot.some(chain => chain.providers.some(provider =>
+      provider.http === 'healthy' || provider.http === 'degraded'));
+    const configuredGraphFreshMs = Math.max(15_000, Number(process.env.CRYPTOCRAWL_OPPORTUNITY_GRAPH_FRESH_MS || 30_000));
+    const graphCycleDurationMs = graph ? Math.max(0, graph.completedAt - graph.startedAt) : 0;
+    // A completed CEX cycle remains fresh through one measured cycle duration plus
+    // its adaptive rescan delay and a heartbeat scheduling margin. A fixed 30s
+    // window incorrectly marked healthy 37-114s scans stale while they ran.
+    const measuredGraphFreshMs = graph
+      ? graphCycleDurationMs + Math.max(1_000, graph.capacity.recommendedIntervalMs) + 15_000
+      : 0;
+    const graphFreshMs = Math.max(configuredGraphFreshMs, Math.min(300_000, measuredGraphFreshMs));
+    const graphReady = !!graph && graph.completedAt >= Date.now() - graphFreshMs && graph.evaluatedSymbols > 0;
+
+    // The multi-topology controller is an independent discovery family. Its most
+    // recent completed cycle may establish discovery liveness while a slow/stale CEX
+    // graph is unavailable. Evidence remains separately mandatory below, so this
+    // freshness signal cannot manufacture candidates or economics.
+    const multiTopologyCycleDurationMs = multiTopology
+      ? Math.max(0, multiTopology.completedAt - multiTopology.startedAt)
+      : 0;
+    const configuredMultiTopologyIntervalMs = Math.max(
+      5_000,
+      Number(process.env.CRYPTOCRAWL_MULTI_TOPOLOGY_SCAN_INTERVAL_MS || 15_000),
+    );
+    const multiTopologyFreshMs = Math.max(
+      15_000,
+      Math.min(300_000, multiTopologyCycleDurationMs + configuredMultiTopologyIntervalMs + 15_000),
+    );
+    const multiTopologyReady = !!multiTopology
+      && multiTopology.completedAt >= Date.now() - multiTopologyFreshMs;
+
+    const discoveryEvidenceCount = Math.max(
+      candidateMetrics.observed,
+      graph?.observedCandidatesRegistered ?? 0,
+      graph?.publicDiscoveryObservations ?? 0,
+    );
+    const inventory = cexInventoryLedger.getSnapshots();
+    const spendableInventory = inventory.filter(snapshot => {
+      const spendable = snapshot.available
+        - snapshot.reserved
+        - snapshot.payoutReserved
+        - snapshot.pendingOrder
+        - snapshot.pendingTransfer
+        - snapshot.minimumReserve;
+      return Number.isFinite(spendable) && spendable > 0;
+    });
+    const spendableInventoryVenues = new Set(spendableInventory.map(snapshot => snapshot.venue)).size;
+    const rebalance = inventoryRebalancer.getStatus();
+    const mcCalibration = monteCarloCalibrationStore.getMetrics();
+    const bookEvolution = orderBookEvolutionStore.getStatus();
+    const mempoolCapabilities = getMempoolCapabilities();
+    const zeroCapitalExecutionEnabled = process.env.ZERO_CAPITAL_ENABLE_EXECUTION === 'true';
+    const zeroCapitalFundingDecisions = getLatestProvenZeroCapitalGasFundingDecisions();
+    const zeroCapitalFundingReady = zeroCapitalFundingDecisions.some(decision =>
+      decision.mode !== 'unavailable'
+      && decision.strictZeroInitialCapitalEligible === true
+      && decision.operatorMonetaryInputRequired === false,
+    );
+    const stageCanExecute = stageManager.canExecuteTrades();
+
+    const readiness = computeCryptoRuntimeReadiness({
+      runtimeIdentitySafe: isRuntimeIdentitySafe(runtime),
+      runtimeIdentityMismatch: runtime.state === 'mismatch',
+      centralizedExecutionConfigured: execution.centralizedExecutionConfigured,
+      coreMarketDataReady,
+      criticalRpcReady,
+      graphReady,
+      multiTopologyReady,
+      discoveryEvidenceCount,
+      canonicalObservedOpportunities: recentMinute.observedOpportunities,
+      schedulerRunning: scheduler.running,
+      noExecutionGuardEnabled: execution.noExecutionGuardEnabled,
+      liveExecutionEnabled: execution.liveExecutionEnabled,
+      liveExecutionConfirmed: execution.liveExecutionConfirmed,
+      reconciledInventoryAssets: inventory.length,
+      spendableInventoryAssets: spendableInventory.length,
+      spendableInventoryVenues,
+      eligibleCandidates: candidateMetrics.eligible,
+      eligibleCexCandidates: candidateMetrics.byTopology.CEX_CEX.eligible,
+      eligibleZeroCapitalCandidates: candidateMetrics.byTopology.ZERO_CAPITAL_ATOMIC.eligible,
+      eligibleKalshiCandidates: candidateMetrics.byTopology.PREDICTION_EVENT.eligible,
+      kalshiExecutionConfigured: execution.kalshiExecutionConfigured,
+      stageCanExecute,
+      currentStage: stage.currentStage,
+      initialGasReady: stageManager.isInitialGasReady(),
+      zeroCapitalFundingReady,
+      zeroCapitalExecutionEnabled,
+    });
+
+    readiness.DISCOVERY_READY.detail += `; cexFreshnessThresholdMs=${graphFreshMs}; cexLastCycleDurationMs=${graphCycleDurationMs}; multiTopologyFreshnessThresholdMs=${multiTopologyFreshMs}; multiTopologyLastCycleDurationMs=${multiTopologyCycleDurationMs}; selectedSymbols=${graph?.selectedSymbols ?? 0}; multiTopologyObserved=${candidateMetrics.observed}`;
+
+    logger.info('[CryptoRuntime] Authoritative runtime heartbeat', {
+      component: 'CryptoRuntimeObservability',
+      runtime,
+      runtimeInvariants: invariantMonitor,
+      performanceTruth,
+      readiness,
+      supabaseDataPath: {
+        path: supabasePath.path,
+        reason: supabasePath.reason,
+        pressureScore: supabasePath.pressureScore,
+        outboxMetricsSource: supabasePath.path === 'comp' ? 'cached' : 'live_refresh',
+      },
+      governance: {
+        stage: stage.currentStage,
+        paused: stage.isPaused,
+        killSwitchActive: stage.killSwitchActive,
+        canExecuteTrades: stageCanExecute,
+        initialGasReady: stageManager.isInitialGasReady(),
+        automaticAdvancementBlockers: [...stage.automaticAdvancementBlockers],
+      },
+      discovery: {
+        cex: graph ? {
+          cycleId: graph.cycleId,
+          cycleTrigger: graph.cycleTrigger,
+          topology: graph.topology,
+          startedAt: graph.startedAt,
+          completedAt: graph.completedAt,
+          cycleDurationMs: graphCycleDurationMs,
+          freshnessThresholdMs: graphFreshMs,
+          discoveryEvidenceCount,
+          universeAssets: graph.universeAssets,
+          selectedSymbols: graph.selectedSymbols,
+          evaluatedSymbols: graph.evaluatedSymbols,
+          deterministicPositive: graph.deterministicPositive,
+          assessedCandidates: graph.assessedCandidates,
+          eligibleCandidates: graph.eligibleCandidates,
+          capacity: graph.capacity,
+          economicBarrier,
+          errors: graph.errors,
+        } : null,
+        multiTopology: {
+          cycle: summarizeMultiTopologyCycle(multiTopology),
+          fresh: multiTopologyReady,
+          cycleDurationMs: multiTopologyCycleDurationMs,
+          freshnessThresholdMs: multiTopologyFreshMs,
+        },
+        candidateRegistry: candidateMetrics,
+      },
+      opportunities: {
+        observedPerMinute: recentMinute.observedOpportunities,
+        verifiedPositivePerMinute: recentMinute.verifiedPositiveOpportunities,
+        eligiblePerMinute: recentMinute.eligibleOpportunities,
+        expectedNetProfitLastHourUsd: recentHour.expectedNetProfitUsd,
+        realizedNetProfitLastHourUsd: recentHour.realizedNetProfitUsd,
+        realizedSettlementsLastHour: recentHour.realizedSettlementCount,
+        profitBlockers: {
+          authenticatedCexFeeBarrier: economicBarrier,
+          stageOneBlockedByFeeEconomics: stage.currentStage === 1
+            && recentMinute.verifiedPositiveOpportunities === 0
+            && economicBarrier?.status === 'fee_blocked',
+          coinStatsRequiredForCoreCexAdvancement: false,
+          coinStatsEnvironmentState: coinStatsEnvironment.state,
+          coinStatsEnvironmentSourceName: coinStatsEnvironment.sourceName,
+        },
+      },
+      latestDecision: latest ? {
+        opportunityId: latest.opportunityId,
+        symbol: latest.symbol,
+        chain: latest.chain,
+        status: latest.status,
+        buyVenue: latest.plan?.buyVenue ?? null,
+        sellVenue: latest.plan?.sellVenue ?? null,
+        buyAsk: latest.plan?.buyAsk ?? null,
+        sellBid: latest.plan?.sellBid ?? null,
+        executableNotionalUsd: latest.plan?.executableNotionalUsd ?? null,
+        grossProfitUsd: latest.plan?.grossProfitUsd ?? null,
+        netProfitUsd: latest.plan?.netProfitUsd ?? null,
+        costs: latest.plan?.costs ?? null,
+        feeEvidence: latest.plan?.feeEvidence ?? null,
+        quoteAgeMs: latest.plan?.quoteAgeMs ?? null,
+        expectedSlippageBps: latest.plan?.expectedSlippageBps ?? null,
+        expectedPriceImpactBps: latest.plan?.expectedPriceImpactBps ?? null,
+        liquidity: latest.plan?.liquidity ?? null,
+        marketData: latest.assessment?.marketData ?? null,
+        technicalProvenance: latest.technical?.dataProvenance ?? null,
+        technicalSignal: latest.technical?.summary.signal ?? null,
+        oracle: latest.oracle ?? null,
+        monteCarlo: latest.assessment?.monteCarlo ?? null,
+        rankScore: latest.assessment?.rankScore ?? null,
+        executionConfidence: latest.assessment?.executionConfidence ?? null,
+        missingInformation: latest.missingInformation,
+        settlement: latest.realized,
+      } : null,
+      providers: {
+        providerMesh: {
+          authority: 'multiProviderRpcManager',
+          criticalRpcReady,
+          healthyProviderCount: rpcSnapshot.reduce(
+            (sum, chain) => sum + chain.providers.filter(provider => provider.http === 'healthy').length,
+            0,
+          ),
+          operationalProviderCount: rpcSnapshot.reduce(
+            (sum, chain) => sum + chain.providers.filter(provider => provider.http === 'healthy' || provider.http === 'degraded').length,
+            0,
+          ),
+          degradedProvidersRemainRouteLocallyUsable: true,
+          alchemyOperationalAuthority: false,
+          paidProviderRequired: false,
+        },
+        rpc: rpcSnapshot,
+        mempoolCapabilities,
+        marketDataAuthority: {
+          coinGeckoRequiredForCoreCexDiscovery: false,
+          directCexMarketEvidenceReady,
+          usableParallelUniverseProviders: usableMarketUniverseProviders.map(status => status.provider),
+        },
+        marketData: providerStatuses.map(status => ({
+          provider: status.provider,
+          state: status.state,
+          observedAt: status.observedAt,
+          detail: status.detail,
+          requiredForCoreCexDiscovery: false,
+          memberOfParallelMarketUniverseMesh: status.provider !== '0x',
+        })),
+        optional: {
+          coinStats: {
+            requiredForCoreCexDiscovery: false,
+            requiredForCoreCexAdvancement: false,
+            environmentState: coinStatsEnvironment.state,
+            sourceName: coinStatsEnvironment.sourceName,
+          },
+        },
+      },
+      venues: getVenueCapabilities(),
+      inventory: {
+        reconciled: inventory,
+        readiness: {
+          spendableAssets: spendableInventory.length,
+          spendableVenues: spendableInventoryVenues,
+          crossVenuePotentiallyRoutable: spendableInventory.length > 0 && spendableInventoryVenues >= 2,
+        },
+        rebalance,
+        zeroCapitalResourcesAreCexInventory: false,
+      },
+      monteCarloCalibration: mcCalibration,
+      orderBookEvolution: bookEvolution,
+      beam: {
+        routed: beam.router,
+        directional: {
+          activeNodes: beam.beam.activeNodes,
+          queuedTasks: beam.beam.queuedTasks,
+          executingTasks: beam.beam.executingTasks,
+          nodes: beam.beam.nodes,
+        },
+        legacyAntenna: {
+          authoritative: false,
+          reason: 'legacy antenna health uses simulated probes and is excluded from trading evidence',
+        },
+        activeRetries: beam.activeRetries,
+      },
+      executionScheduler: scheduler,
+      learning: {
+        ...measured,
+        durableOutbox: intelligenceOutbox,
+      },
+      executionPosture: {
+        ...execution,
+        zeroCapitalExecutionEnabled,
+        zeroCapitalFundingReady,
+      },
+    });
+  } catch (error) {
+    logger.warn('[CryptoRuntime] Runtime heartbeat degraded', {
+      component: 'CryptoRuntimeObservability',
+      error: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    heartbeatRunning = false;
+  }
+}
+
+export function ensureCryptoRuntimeObservability(): void {
+  if (heartbeatTimer) return;
+  const intervalMs = Math.max(15_000, Number(process.env.CRYPTOCRAWL_RUNTIME_HEARTBEAT_MS || 60_000));
+  void emitCryptoRuntimeHeartbeat();
+  heartbeatTimer = setInterval(() => void emitCryptoRuntimeHeartbeat(), intervalMs);
+  heartbeatTimer.unref();
+  logger.info('[CryptoRuntime] Runtime observability installed', {
+    component: 'CryptoRuntimeObservability',
+    heartbeatMs: intervalMs,
+    supabaseCompCachedDbMetrics: true,
+    runtimeAttestation: true,
+    runtimeInvariantMonitor: true,
+    durableLearningOutboxTelemetry: true,
+    performanceTruthContractTelemetry: true,
+    decomposedReadiness: [
+      'APP_READY',
+      'CONFIG_READY',
+      'DATA_READY',
+      'DISCOVERY_READY',
+      'EXECUTION_CAPABILITY_READY',
+      'INVENTORY_READY',
+      'CANDIDATE_READY',
+      'GOVERNANCE_READY',
+      'EXECUTION_READY',
+      'TRADING_READY',
+    ],
+    executionReadySemantics: 'strict_topology_specific_canonical_cex_trade_ready',
+    providerHeartbeat: ['free/configured-provider-mesh', 'mempool-capability', 'market-data'],
+    alchemyOperationalAuthority: false,
+    measuredOpportunityGraphTelemetry: true,
+    cexEconomicBarrierTelemetry: true,
+    multiTopologyCandidateTelemetry: true,
+    boundedMultiTopologyHeartbeat: true,
+    topologyLocalDiscoveryReadiness: true,
+    degradedRpcOperationalReadiness: true,
+    inventoryTelemetry: true,
+    monteCarloCalibrationTelemetry: true,
+    orderBookEvolutionTelemetry: true,
+    canonicalDecisionTelemetry: true,
+    canonicalExecutionSchedulerTelemetry: true,
+    directionalBeamTelemetry: true,
+    legacyAntennaAuthoritative: false,
+    settlementLearningTelemetry: true,
+  });
+}
+export function stopCryptoRuntimeObservability(): void {
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  heartbeatTimer = null;
+}

@@ -1,0 +1,414 @@
+import { access, readFile } from 'node:fs/promises';
+import path from 'node:path';
+import logger from '../../../logger.js';
+import {
+  assertCryptocrawlRuntimeDatabaseAvailable,
+  coordinationPool,
+} from './cryptocrawl-runtime-database.js';
+
+const SCHEMA_VERSION = 29;
+const LOCK_NAME = 'cryptocrawl:overflow-runtime-schema:v29';
+
+const MIGRATIONS = [
+  'overflow/003_cryptocrawler_runtime_prerequisites.sql',
+  '007_zero_capital_execution_ledger.sql',
+  '008_zero_capital_capital_provenance.sql',
+  '009_railway_bootstrap_budget.sql',
+  '010_cryptocrawl_governance_state.sql',
+  '011_zero_capital_native_gas_funding.sql',
+  '012_zero_capital_profit_recipient_proof.sql',
+  '013_cryptocrawler_private_intelligence_memory.sql',
+  '014_cryptocrawler_private_outbox.sql',
+  '015_cryptocrawler_terminal_treasury_sweep.sql',
+  '017_cryptocrawler_terminal_sweep_truth_guard.sql',
+  '018_cryptocrawler_profit_split_eth_payout.sql',
+  '019_cryptocrawler_dynamic_payout_strategy.sql',
+  '020_cryptocrawler_trade_safe_payout_liquidity.sql',
+  '021_cryptocrawler_inventory_access_hardening.sql',
+  '022_cryptocrawler_payout_destination_fallback.sql',
+  '023_cryptocrawler_hot_path_schema_authority.sql',
+  '024_cryptocrawler_funding_lifecycle.sql',
+  '025_cryptocrawler_rainbow_source_ledger.sql',
+  '026_cryptocrawler_system_capital_allocations.sql',
+  '027_cryptocrawler_cex_system_owned_lots.sql',
+  '028_cryptocrawler_payout_recipient_confirmation.sql',
+  '029_cryptocrawler_terminal_sweep_recipient_confirmation.sql',
+  '030_cryptocrawler_payout_confirmation_truth_guard.sql',
+  '031_cryptocrawler_payout_confirmation_wait.sql',
+  '032_cryptocrawler_operator_trading_strategy.sql',
+  '033_cryptocrawler_operator_strategy_sequential_submission.sql',
+  '034_cryptocrawler_system_capital_treasury_strategy.sql',
+  '035_cryptocrawler_payout_funding_and_exact_transfer.sql',
+  '036_cryptocrawler_system_capital_wallet_sweep.sql',
+  '037_cryptocrawler_treasury_reservation_unification.sql',
+  '038_cryptocrawler_system_capital_sweep_idempotency.sql',
+  '039_cryptocrawler_system_capital_transfer_truth_hardening.sql',
+  '040_cryptocrawler_treasury_reservation_lifecycle_guard.sql',
+  '041_cryptocrawler_controlled_loss_learning.sql',
+  '042_cryptocrawler_onchain_system_capital.sql',
+  '043_cryptocrawler_cross_chain_lifecycle.sql',
+  '044_cryptocrawler_funding_feedback_recovery.sql',
+  '045_cryptocrawler_system_native_gas_spend_authority.sql',
+  '046_cryptocrawler_kalshi_system_owned_margin_capital.sql',
+  '047_cryptocrawler_kalshi_event_system_owned_cash.sql',
+  '048_cryptocrawler_kalshi_event_lifecycle.sql',
+  '049_cryptocrawler_kalshi_probability_calibration.sql',
+  '050_cryptocrawler_kalshi_event_market_maker.sql',
+  '051_cryptocrawler_polymarket_event_order_recovery.sql',
+  '052_cryptocrawler_polymarket_system_owned_cash.sql',
+  '053_cryptocrawler_cross_venue_event_lifecycle.sql',
+  '054_cryptocrawler_polymarket_redemption_recovery.sql',
+  '055_cryptocrawler_coinbase_system_owned_capital.sql',
+  '056_subagent_runtime_prerequisites.sql',
+  '057_cryptocrawler_ghost_wallet_runtime.sql',
+  '059_cryptocrawler_zero_capital_rescue_fairness.sql',
+  '060_lexara_overflow_conversation_history.sql',
+  'overflow/004_cryptocrawler_terminal_support.sql',
+] as const;
+
+type MigrationPath = typeof MIGRATIONS[number];
+
+// Schema v26 predates Ghost Wallet durability and v27 predates the Atomic rescue
+// fairness ledger. Advance either known state with only its missing deltas;
+// older/unknown states retain the complete idempotent repair path.
+const INCREMENTAL_MIGRATIONS: Readonly<Record<number, readonly MigrationPath[]>> = {
+  26: [
+    '057_cryptocrawler_ghost_wallet_runtime.sql',
+    '059_cryptocrawler_zero_capital_rescue_fairness.sql',
+    '060_lexara_overflow_conversation_history.sql',
+  ],
+  27: [
+    '059_cryptocrawler_zero_capital_rescue_fairness.sql',
+    '060_lexara_overflow_conversation_history.sql',
+  ],
+  28: ['060_lexara_overflow_conversation_history.sql'],
+};
+
+const REQUIRED_TABLES = [
+  'public.zero_capital_execution_ledger',
+  'public.zero_capital_capital_state',
+  'public.zero_capital_capital_events',
+  'public.railway_bootstrap_budget_events',
+  'public.railway_bootstrap_budget_reservations',
+  'public.cryptocrawl_governance_state',
+  'public.zero_capital_native_gas_funding_attempts',
+  'public.cryptocrawler_zero_capital_rescue_fairness',
+  'public.cryptocrawler_resource_leases',
+  'public.cryptocrawler_mc_calibration_v1',
+  'private.cryptocrawler_kraken_nonce_state',
+  'private.cryptocrawler_funding_lifecycles',
+  'public.cryptocrawler_terminal_sweep_control',
+  'public.cryptocrawler_terminal_sweep_legs',
+  'public.cryptocrawler_profit_payout_jobs',
+  'public.cryptocrawler_profit_payout_batches',
+  'public.cryptocrawler_profit_payout_batch_allocations',
+  'public.cryptocrawler_payout_asset_reservations',
+  'public.cryptocrawler_payout_execution_reservations',
+  'public.cryptocrawler_cex_inventory_state_v1',
+  'public.cryptocrawler_cex_inventory_reservations_v1',
+  'public.cryptocrawler_system_capital_allocations',
+  'public.cryptocrawler_cex_system_owned_lots',
+  'public.cryptocrawler_cex_system_owned_settlements',
+  'public.cryptocrawler_kalshi_system_owned_margin_lots',
+  'public.cryptocrawler_kalshi_margin_reservations',
+  'public.cryptocrawler_kalshi_margin_settlements',
+  'public.cryptocrawler_kalshi_event_system_owned_cash_lots',
+  'public.cryptocrawler_kalshi_event_cash_reservations',
+  'public.cryptocrawler_kalshi_event_cash_settlements',
+  'private.cryptocrawler_kalshi_event_lifecycles',
+  'private.cryptocrawler_kalshi_probability_observations',
+  'private.cryptocrawler_kalshi_probability_models',
+  'private.cryptocrawler_kalshi_event_maker_lifecycles',
+  'private.cryptocrawler_kalshi_event_maker_performance',
+  'private.cryptocrawler_polymarket_event_order_intents',
+  'public.cryptocrawler_polymarket_system_owned_cash_lots',
+  'public.cryptocrawler_polymarket_cash_reservations',
+  'public.cryptocrawler_polymarket_cash_settlements',
+  'private.cryptocrawler_cross_venue_event_lifecycles',
+  'private.cryptocrawler_polymarket_redemption_intents',
+  'public.cryptocrawler_onchain_system_owned_lots',
+  'public.cryptocrawler_onchain_inventory_reservations',
+  'public.cryptocrawler_onchain_system_owned_settlements',
+  'public.cryptocrawler_cross_chain_lifecycles',
+  'public.cryptocrawler_operator_strategy_control',
+  'public.cryptocrawler_operator_strategy_cycles',
+  'public.cryptocrawler_operator_strategy_days',
+  'public.cryptocrawler_operator_trade_reservations',
+  'public.cryptocrawler_operator_profit_events',
+  'public.cryptocrawler_retained_exchange_allocations',
+  'public.cryptocrawler_system_capital_transfers',
+  'public.cryptocrawler_system_capital_transfer_lots',
+  'public.cryptocrawler_system_capital_sweep_batches',
+  'public.cryptocrawler_system_capital_sweep_conversions',
+  'public.cryptocrawler_payout_funding_transfers',
+  'public.cryptocrawler_controlled_loss_learning_events',
+  'public.cryptocrawler_system_native_gas_spends',
+  'private.cryptocrawler_rainbow_profit_events',
+  'private.cryptocrawler_rainbow_profit_sources',
+  'private.cryptara_trade_outcomes',
+  'private.cryptara_decision_events',
+  'private.cryptara_market_regimes',
+  'private.cryptara_metric_samples',
+  'private.cryptara_state_snapshots',
+  'private.cryptara_patterns',
+  'private.cryptara_outbox',
+  'private.cryptocrawler_ghost_wallet_work',
+  'private.cryptocrawler_ghost_wallet_venues',
+  'private.cryptocrawler_ghost_wallet_runtime_state',
+  'public.subagent_capabilities',
+  'public.subagent_learning_patterns',
+  'public.subagent_performance_metrics',
+  'public.subagent_self_improvement_actions',
+  'public.jurisdiction_populations',
+  'public.officer_category_priority',
+  'public.subagent_search_queue',
+  'public.subagent_search_sessions',
+  'public.ai_usage_metrics',
+  'public.lexara_conversations',
+  'private.cryptocrawler_overflow_runtime_meta',
+] as const;
+
+const REQUIRED_FUNCTIONS = [
+  'private.cryptocrawler_claim_resource_slot(text,integer,integer,text,text,text,timestamp with time zone)',
+  'private.cryptocrawler_seed_cex_system_owned_lot()',
+  'private.cryptocrawler_seed_polymarket_system_owned_cash_lot()',
+  'private.cryptocrawler_ghost_wallet_notify_work()',
+  'public.cryptocrawler_treasury_worker_claim(text,integer)',
+  'public.cryptocrawler_treasury_worker_release(text)',
+  'public.cryptocrawler_terminal_sweep_truth_guard()',
+  'public.cryptocrawler_terminal_sweep_leg_confirmation_guard()',
+  'public.cryptocrawler_profit_payout_confirmation_guard()',
+  'public.cryptocrawler_terminal_sweep_secret(text)',
+  'public.cryptocrawler_terminal_sweep_finalize_events(uuid)',
+  'public.cryptocrawler_okx_treasury_spendable(text)',
+  'public.cryptocrawler_profit_payout_batch_confirm(text,text,text)',
+  'public.cryptocrawler_treasury_claim_okx_liquidity(text,text,numeric)',
+  'public.cryptocrawler_operator_strategy_record_profit(text,text,numeric)',
+  'public.cryptocrawler_reserve_system_capital_transfer(uuid,text,text,numeric)',
+  'public.cryptocrawler_release_system_capital_transfer(uuid)',
+  'public.cryptocrawler_confirm_system_capital_transfer_exact(uuid,numeric,numeric,numeric,text,text,jsonb)',
+  'public.cryptocrawler_confirm_payout_funding_transfer(text,numeric,numeric,text,text,text,jsonb,jsonb)',
+  'public.cryptocrawler_gate_non_okx_payout_schedule()',
+  'public.cryptocrawler_enforce_lifecycle_inventory_reservation()',
+  'public.cryptocrawler_record_controlled_loss_terminal(uuid,numeric,jsonb)',
+  'public.cryptocrawler_reserve_system_native_gas_spend(text,text,text,text,text,numeric)',
+  'public.cryptocrawler_submit_system_native_gas_spend(uuid,text)',
+  'public.cryptocrawler_settle_system_native_gas_spend(uuid,text,numeric,jsonb)',
+  'public.cryptocrawler_release_system_native_gas_spend(uuid)',
+  'public.cryptocrawler_mark_system_native_gas_spend_manual_review(uuid,text)',
+  'public.cryptocrawler_reserve_kalshi_system_margin(text,text,numeric,timestamp with time zone,jsonb)',
+  'public.cryptocrawler_release_kalshi_system_margin(uuid)',
+  'public.cryptocrawler_renew_kalshi_system_margin(uuid,timestamp with time zone)',
+  'public.cryptocrawler_reserve_kalshi_event_system_cash(text,text,numeric,timestamp with time zone,jsonb)',
+  'public.cryptocrawler_release_kalshi_event_system_cash(uuid)',
+  'public.cryptocrawler_renew_kalshi_event_system_cash(uuid,timestamp with time zone)',
+  'public.cryptocrawler_reserve_polymarket_system_cash(text,text,numeric,timestamp with time zone,jsonb)',
+  'public.cryptocrawler_release_polymarket_system_cash(uuid)',
+  'public.cryptocrawler_renew_polymarket_system_cash(uuid,timestamp with time zone)',
+] as const;
+
+let schemaReady = false;
+let schemaInFlight: Promise<void> | null = null;
+let lastError: string | null = null;
+let verifiedAt = 0;
+let durableFastPathHits = 0;
+let migrationRuns = 0;
+let lastMigrationCount = 0;
+let lastProvisionMode: 'none' | 'durable_fast_path' | 'incremental_repair' | 'migration_repair' = 'none';
+
+async function migrationRoot(): Promise<string> {
+  const candidates = [path.resolve(process.cwd(), 'dist', 'migrations'), path.resolve(process.cwd(), 'server', 'migrations')];
+  for (const candidate of candidates) {
+    try { await access(candidate); return candidate; } catch { /* try next layout */ }
+  }
+  throw new Error('CryptoCrawler migration directory is unavailable in the runtime image');
+}
+
+async function verifyRequiredObjects(client: any): Promise<void> {
+  const tableResult = await client.query(`SELECT name, to_regclass(name) IS NOT NULL AS ready FROM unnest($1::text[]) AS name`, [REQUIRED_TABLES]);
+  const missingTables = tableResult.rows.filter((row: any) => row?.ready !== true).map((row: any) => String(row?.name || 'unknown'));
+  if (missingTables.length > 0) throw new Error(`Overflow CryptoCrawler runtime schema incomplete: ${missingTables.join(', ')}`);
+  const functionResult = await client.query(`SELECT name, to_regprocedure(name) IS NOT NULL AS ready FROM unnest($1::text[]) AS name`, [REQUIRED_FUNCTIONS]);
+  const missingFunctions = functionResult.rows.filter((row: any) => row?.ready !== true).map((row: any) => String(row?.name || 'unknown'));
+  if (missingFunctions.length > 0) throw new Error(`Overflow CryptoCrawler runtime functions incomplete: ${missingFunctions.join(', ')}`);
+}
+
+async function verifyRuntimeWriteAuthority(client: any): Promise<void> {
+  const state = await client.query(`
+    SELECT
+      current_setting('transaction_read_only') AS transaction_read_only,
+      current_setting('default_transaction_read_only') AS default_transaction_read_only,
+      pg_is_in_recovery() AS in_recovery
+  `);
+  const row = state.rows?.[0] || {};
+  if (row.transaction_read_only !== 'off' || row.default_transaction_read_only !== 'off' || row.in_recovery === true) {
+    throw new Error(
+      `Overflow runtime authority is not writable: transaction_read_only=${String(row.transaction_read_only)} default_transaction_read_only=${String(row.default_transaction_read_only)} in_recovery=${String(row.in_recovery)}`,
+    );
+  }
+
+  await client.query('BEGIN');
+  try {
+    await client.query('SET TRANSACTION READ WRITE');
+    const canary = await client.query(`
+      UPDATE private.cryptocrawler_overflow_runtime_meta
+      SET updated_at=updated_at
+      WHERE system_key='cryptocrawler'
+      RETURNING system_key
+    `);
+    if (canary.rowCount !== 1 || canary.rows?.[0]?.system_key !== 'cryptocrawler') {
+      throw new Error('Overflow runtime write canary could not touch the canonical metadata row');
+    }
+  } finally {
+    await client.query('ROLLBACK').catch(() => undefined);
+  }
+}
+
+type DurableSchemaState = {
+  exists: boolean;
+  version: number | null;
+  ready: boolean;
+};
+
+async function readDurableSchemaState(client: any): Promise<DurableSchemaState> {
+  const meta = await client.query(`SELECT to_regclass('private.cryptocrawler_overflow_runtime_meta') IS NOT NULL AS meta_exists`);
+  if (meta.rows?.[0]?.meta_exists !== true) return { exists: false, version: null, ready: false };
+  const state = await client.query(`SELECT schema_version, schema_ready FROM private.cryptocrawler_overflow_runtime_meta WHERE system_key='cryptocrawler' LIMIT 1`);
+  const row = state.rows?.[0];
+  const version = Number(row?.schema_version);
+  return {
+    exists: true,
+    version: Number.isSafeInteger(version) && version >= 0 ? version : null,
+    ready: row?.schema_ready === true,
+  };
+}
+
+function migrationPlan(state: DurableSchemaState): readonly MigrationPath[] {
+  if (state.exists && state.version !== null && state.version < SCHEMA_VERSION) {
+    const incremental = INCREMENTAL_MIGRATIONS[state.version];
+    if (incremental?.length) return incremental;
+  }
+  return MIGRATIONS;
+}
+
+async function runMigrations(client: any, migrations: readonly MigrationPath[]): Promise<void> {
+  const root = await migrationRoot();
+  migrationRuns += 1;
+  lastMigrationCount = migrations.length;
+  lastProvisionMode = migrations === MIGRATIONS ? 'migration_repair' : 'incremental_repair';
+  for (const relativePath of migrations) {
+    const sql = await readFile(path.join(root, relativePath), 'utf8');
+    await client.query(sql);
+  }
+}
+
+async function markVerified(client: any): Promise<void> {
+  await client.query(
+    `INSERT INTO private.cryptocrawler_overflow_runtime_meta
+       (system_key, schema_version, schema_ready, verified_at, last_error, updated_at)
+     VALUES ('cryptocrawler', $1, true, now(), NULL, now())
+     ON CONFLICT (system_key) DO UPDATE
+     SET schema_version=EXCLUDED.schema_version,schema_ready=true,verified_at=now(),last_error=NULL,updated_at=now()`,
+    [SCHEMA_VERSION],
+  );
+}
+
+async function provision(): Promise<void> {
+  assertCryptocrawlRuntimeDatabaseAvailable();
+  const client = await coordinationPool.connect();
+  let locked = false;
+  try {
+    const lock = await client.query('SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS acquired', [LOCK_NAME]);
+    locked = lock.rows?.[0]?.acquired === true;
+    if (!locked) throw new Error('Overflow CryptoCrawler schema authority is currently owned by another replica');
+
+    let durableReady = false;
+    let durableState: DurableSchemaState = { exists: false, version: null, ready: false };
+    try {
+      durableState = await readDurableSchemaState(client);
+      durableReady = durableState.version === SCHEMA_VERSION && durableState.ready;
+      if (durableReady) await verifyRequiredObjects(client);
+    } catch (error) {
+      logger.warn('[CryptoCrawlerOverflowSchema] Durable schema marker/object verification requires repair', {
+        component: 'CryptoCrawlerOverflowRuntimeSchema', schemaVersion: SCHEMA_VERSION,
+        observedSchemaVersion: durableState.version,
+        error: error instanceof Error ? error.message : String(error), primaryFallbackUsed: false,
+      });
+      durableReady = false;
+    }
+
+    if (durableReady) {
+      // Object existence is not execution authority. Prove this exact Overflow
+      // session is read-write with persistent-table DML that is always rolled back.
+      await verifyRuntimeWriteAuthority(client);
+      durableFastPathHits += 1;
+      lastMigrationCount = 0;
+      lastProvisionMode = 'durable_fast_path';
+    } else {
+      const plan = migrationPlan(durableState);
+      logger.info('[CryptoCrawlerOverflowSchema] Applying bounded schema repair plan', {
+        component: 'CryptoCrawlerOverflowRuntimeSchema',
+        observedSchemaVersion: durableState.version,
+        targetSchemaVersion: SCHEMA_VERSION,
+        migrationCount: plan.length,
+        migrations: [...plan],
+        fullReplay: plan === MIGRATIONS,
+        primaryFallbackUsed: false,
+      });
+      await runMigrations(client, plan);
+      await verifyRequiredObjects(client);
+      await markVerified(client);
+      await verifyRuntimeWriteAuthority(client);
+    }
+
+    schemaReady = true;
+    lastError = null;
+    verifiedAt = Date.now();
+    logger.info('[CryptoCrawlerOverflowSchema] Complete runtime authority schema verified on writable Overflow', {
+      component: 'CryptoCrawlerOverflowRuntimeSchema', schemaVersion: SCHEMA_VERSION, provisionMode: lastProvisionMode,
+      durableFastPathHits, migrationRuns, migrationCount: lastMigrationCount,
+      requiredTableCount: REQUIRED_TABLES.length, requiredFunctionCount: REQUIRED_FUNCTIONS.length,
+      writeAuthorityVerified: true,
+      writeCanaryMutationCommitted: false,
+      duplicateTerminalSchedulerInstalled: false, primaryFallbackUsed: false,
+    });
+  } catch (error) {
+    schemaReady = false;
+    lastError = error instanceof Error ? error.message : String(error);
+    try {
+      await client.query(`UPDATE private.cryptocrawler_overflow_runtime_meta SET schema_ready=false, last_error=$1, updated_at=now() WHERE system_key='cryptocrawler'`, [lastError]);
+    } catch { /* prerequisite relation itself may be missing or authority may be read-only */ }
+    throw error;
+  } finally {
+    if (locked) {
+      try { await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [LOCK_NAME]); } catch { /* session release clears lock */ }
+    }
+    client.release();
+  }
+}
+
+export async function ensureCryptocrawlOverflowRuntimeSchema(): Promise<void> {
+  if (schemaReady) return;
+  if (schemaInFlight) return schemaInFlight;
+  schemaInFlight = provision().finally(() => { schemaInFlight = null; });
+  return schemaInFlight;
+}
+
+export function getCryptocrawlOverflowRuntimeSchemaSnapshot() {
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    ready: schemaReady,
+    inFlight: schemaInFlight !== null,
+    verifiedAt,
+    lastError,
+    provisionMode: lastProvisionMode,
+    durableFastPathHits,
+    migrationRuns,
+    migrationCount: MIGRATIONS.length,
+    lastMigrationCount,
+    requiredTables: [...REQUIRED_TABLES],
+    requiredFunctions: [...REQUIRED_FUNCTIONS],
+    writeAuthorityProbe: 'rollback_persistent_update' as const,
+    duplicateTerminalSchedulerInstalled: false as const,
+  };
+}

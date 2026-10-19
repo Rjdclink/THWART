@@ -1,0 +1,652 @@
+import { discoverySignal } from './lexara/DiscoveryDiagnostics';
+import { meterClaudeRequest } from './claudeUsage';
+/**
+ * Claude (Anthropic) AI Service - High-quality reasoning
+ * Used for 5-10% of AI requests
+ */
+
+import Anthropic from '@anthropic-ai/sdk';
+import type { MessageCreateParamsNonStreaming } from '@anthropic-ai/sdk/resources/messages';
+import { CURRENT_AI_MODELS, LEGAL_AI_MODELS } from './aiHarmonyModelRegistry';
+
+let claudeClient: Anthropic | null = null;
+
+function getClaudeApiKey(): string | undefined {
+  return process.env.ANTHROPIC_API_KEY?.trim() || process.env.CLAUDE_API_KEY?.trim();
+}
+
+function getClaudeClient(): Anthropic {
+  if (!claudeClient) {
+    const apiKey = getClaudeApiKey();
+    if (!apiKey) {
+      throw new Error('ANTHROPIC_API_KEY or CLAUDE_API_KEY environment variable is not set');
+    }
+    claudeClient = new Anthropic({ apiKey });
+  }
+  return claudeClient;
+}
+
+/**
+ * Check if Claude is available
+ */
+export function isClaudeAvailable(): boolean {
+  return !!getClaudeApiKey();
+}
+
+export interface ClaudeOptions {
+  systemPrompt?: string;
+  temperature?: number;
+  maxTokens?: number;
+  model?: string;
+  useJSON?: boolean;
+  signal?: AbortSignal;
+  providerPolicy?: string;
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  cacheSystemPrompt?: boolean;
+  cacheSystemPromptPrefix?: string;
+}
+
+/** Cache stable instructions while retaining fresh evidence outside the breakpoint. */
+export function buildClaudeSystemBlocks(systemText: string, enabled: boolean, prefix?: string) {
+  if (!enabled) return systemText;
+  if (prefix !== undefined && (prefix.length < 2_048 || !systemText.startsWith(prefix))) return systemText;
+  const cached = prefix ?? systemText;
+  const remainder = systemText.slice(cached.length);
+  return [
+    { type: 'text', text: cached, cache_control: { type: 'ephemeral' } } as const,
+    ...(remainder ? [{ type: 'text' as const, text: remainder }] : []),
+  ];
+}
+
+export interface ClaudeStreamingOptions extends ClaudeOptions {
+  onTextDelta?: (delta: string) => void;
+  onSpeechChunk?: (chunk: string) => void;
+}
+
+const CLAUDE_SPEECH_ABBREVIATIONS = [
+  'u.s.', 'u.s.c.', 'f.2d.', 'f.3d.', 's.ct.', 'l.ed.', 'v.', 'no.', 'nos.',
+  'mr.', 'mrs.', 'ms.', 'dr.', 'inc.', 'corp.', 'ltd.', 'e.g.', 'i.e.', 'etc.',
+];
+
+function findSafeSpeechBoundary(value: string): number {
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (char !== '.' && char !== '!' && char !== '?') continue;
+    if (char === '.' && /\d/.test(value[index - 1] || '') && /\d/.test(value[index + 1] || '')) continue;
+
+    let end = index + 1;
+    while (end < value.length && /["')\]]/.test(value[end])) end += 1;
+    if (end < value.length && !/\s/.test(value[end])) continue;
+
+    const candidate = value.slice(0, end).trim();
+    if (candidate.length < 24) continue;
+    const lower = candidate.toLowerCase();
+    if (CLAUDE_SPEECH_ABBREVIATIONS.some(abbreviation => lower.endsWith(abbreviation))) continue;
+
+    return end;
+  }
+  return -1;
+}
+
+/**
+ * Generate text using Claude
+ */
+export async function callClaude(
+  prompt: string,
+  options: ClaudeOptions = {}
+): Promise<{ content: string; tokensUsed: number }> {
+  try {
+    const client = getClaudeClient();
+    
+    const systemPrompt = options.systemPrompt || '';
+    const jsonInstruction = options.useJSON 
+      ? '\n\nIMPORTANT: Respond ONLY with valid JSON. No markdown, no explanations, just raw JSON.'
+      : '';
+    
+    const model = options.model || CURRENT_AI_MODELS.claudeBalanced;
+    const samplingControlsDeprecated = /claude-(?:opus|sonnet|haiku)-5|claude-opus-4-(?:7|8|9)/i.test(model);
+    const effectiveEffort = /^claude-haiku-4-5/i.test(model)
+    ? undefined
+    : /^claude-haiku-5-5$/i.test(model) ? 'low' : options.effort;
+    const systemText = systemPrompt + jsonInstruction;
+    // Claude 5.5 can cache prompts at 512+ tokens. Restrict caching to large,
+    // repeated LegalWhat system directives so one-off short prompts do not pay
+    // a cache-write premium without a realistic chance of reuse.
+    const cacheSystemPrompt = options.cacheSystemPrompt === true && systemText.length >= 2_048;
+    const createMessage = (maxTokens: number, retryEffort = effectiveEffort) => {
+      const requestBody: MessageCreateParamsNonStreaming = {
+        model,
+        max_tokens: maxTokens,
+        ...(!samplingControlsDeprecated && options.temperature !== undefined
+          ? { temperature: options.temperature }
+          : {}),
+        ...(retryEffort ? { output_config: { effort: retryEffort } } : {}),
+        system: buildClaudeSystemBlocks(systemText, cacheSystemPrompt, options.cacheSystemPromptPrefix),
+        messages: [
+          {
+            role: 'user',
+            content: prompt
+          }
+        ]
+      };
+      return meterClaudeRequest(model, 'messages', () => client.messages.create(requestBody, {
+        signal: discoverySignal(options.signal),
+        ...(options.providerPolicy === 'legalwhat' ? { maxRetries: 0 } : {}),
+      }));
+    };
+
+    const extractText = (message: Awaited<ReturnType<typeof createMessage>>) =>
+      message.content
+        .flatMap(block =>
+          block.type === 'text' && typeof (block as any).text === 'string'
+            ? [(block as any).text]
+            : []
+        )
+        .join('\n')
+        .trim();
+
+    let response = await createMessage(options.maxTokens || 2000);
+    let content = extractText(response);
+
+    // A successful HTTP response can legitimately end without a text block.
+    // Treat stop_reason as protocol state, not as an undifferentiated provider
+    // failure. If the model spent the entire budget before producing text, make
+    // one bounded continuation-sized retry; every other state remains local and
+    // is surfaced with enough metadata for the circuit breaker to classify it.
+    if (!content && response.stop_reason === 'max_tokens' && !options.signal?.aborted) {
+      const retryBudget = Math.min(
+        4000,
+        Math.max(3000, (options.maxTokens || 2000) * 2),
+      );
+      // Retry only the specific no-answer state. Reduce reasoning effort to
+      // reserve output tokens for text; this applies to Sonnet and Opus while
+      // Haiku keeps its supported provider default.
+      response = await createMessage(retryBudget, effectiveEffort ? 'low' : undefined);
+      content = extractText(response);
+    }
+
+    if (!content) {
+      const blockTypes = response.content.map(block => block.type).join(',') || 'none';
+      throw new Error(
+        `Claude returned no text content block (stop_reason=${response.stop_reason || 'unknown'}, blocks=${blockTypes})`,
+      );
+    }
+
+    const usage = response.usage as any;
+    const inputTokens = Number(usage.input_tokens || 0);
+    const outputTokens = Number(usage.output_tokens || 0);
+    const cacheReadInputTokens = Number(usage.cache_read_input_tokens || 0);
+    const cacheCreationInputTokens = Number(usage.cache_creation_input_tokens || 0);
+    const tokensUsed = inputTokens + outputTokens + cacheReadInputTokens + cacheCreationInputTokens;
+
+    const totalInputTokens = inputTokens + cacheReadInputTokens + cacheCreationInputTokens;
+    const rates = /^claude-haiku-5-5$/i.test(model)
+      ? totalInputTokens > 100_000
+        ? { input: 0.5, output: 2.5, cacheRead: 0.05, cacheWrite: 0.625 }
+        : { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 }
+      : /claude-opus-5-5/i.test(model)
+        ? { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 }
+        : /claude-sonnet-5-5/i.test(model)
+          ? { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 }
+          : null;
+    if (rates) {
+      const estimatedUsd = (
+        inputTokens * rates.input
+        + outputTokens * rates.output
+        + cacheReadInputTokens * rates.cacheRead
+        + cacheCreationInputTokens * rates.cacheWrite
+      ) / 1_000_000;
+      console.info('[Claude Usage]', {
+        model,
+        effort: effectiveEffort || 'provider-default',
+        inputTokens,
+        outputTokens,
+        cacheReadInputTokens,
+        cacheCreationInputTokens,
+        estimatedUsd: Number(estimatedUsd.toFixed(6)),
+      });
+    }
+
+    // Let legal verification distinguish truncated JSON from missing legal authority.
+    return { content, tokensUsed, stopReason: response.stop_reason };
+  } catch (error: any) {
+    // Preserve cancellation semantics. Harmony deliberately aborts losing hedges
+    // and provider deadlines; wrapping those aborts as generic Claude failures
+    // poisoned provider health and produced misleading production errors.
+    if (options.signal?.aborted) {
+      const reason = options.signal.reason;
+      if (reason instanceof Error || reason instanceof DOMException) throw reason;
+      throw new DOMException(
+        typeof reason === 'string' ? reason : 'Claude request cancelled',
+        'AbortError',
+      );
+    }
+    console.error('[Claude] Error:', error);
+    throw Object.assign(new Error(`Claude API error: ${error.message}`), { headers: error.headers, status: error.status });
+  }
+}
+
+
+export interface ClaudeWebSearchSource {
+  url: string;
+  title?: string;
+  citedText?: string;
+}
+
+export interface ClaudeWebSearchOptions {
+  systemPrompt?: string;
+  maxTokens?: number;
+  maxUses?: number;
+  model?: string;
+  signal?: AbortSignal;
+  allowFetch?: boolean;
+  maxFetchUses?: number;
+  maxFetchContentTokens?: number;
+  retryTruncatedOutput?: boolean;
+}
+
+/**
+ * Anthropic-hosted web search transport for explicit research lanes.
+ *
+ * This is intentionally separate from callClaude(): ordinary reasoning never
+ * acquires web access implicitly. Background research may run this transport in
+ * parallel with Lexara's independent discovery lanes.
+ */
+export async function callClaudeWebSearch(
+  prompt: string,
+  options: ClaudeWebSearchOptions = {},
+): Promise<{
+  content: string;
+  sources: ClaudeWebSearchSource[];
+  tokensUsed: number;
+  searches: number;
+}> {
+  const client = getClaudeClient();
+  const model = options.model || CURRENT_AI_MODELS.claudeBalanced;
+  const maxUses = Math.max(1, Math.min(options.maxUses || 4, 8));
+  const tools: any[] = [{
+    type: 'web_search_20260318',
+    name: 'web_search',
+    max_uses: maxUses,
+    allowed_callers: ['direct'],
+  }];
+  if (options.allowFetch === true) {
+    tools.push({
+      type: 'web_fetch_20260318',
+      name: 'web_fetch',
+      max_uses: Math.max(1, Math.min(options.maxFetchUses ?? maxUses, 8)),
+      ...(options.maxFetchContentTokens ? { max_content_tokens: Math.max(1, Math.floor(options.maxFetchContentTokens)) } : {}),
+      allowed_callers: ['direct'],
+      citations: { enabled: true },
+      response_inclusion: 'full',
+    });
+  }
+  const messages: any[] = [{ role: 'user', content: prompt }];
+  const sourceMap = new Map<string, ClaudeWebSearchSource>();
+  const accumulatedText: string[] = [];
+  let response: any;
+  let tokensUsed = 0;
+  let searches = 0;
+  let requestMaxTokens = options.maxTokens || 900;
+  let maxTokenRetryUsed = false;
+
+  const collectResponse = (payload: any) => {
+    const blocks: any[] = Array.isArray(payload?.content) ? payload.content : [];
+    for (const block of blocks) {
+      if (block?.type === 'web_search_tool_result') {
+        const results = Array.isArray(block.content) ? block.content : [];
+        for (const result of results) {
+          const url = typeof result?.url === 'string' ? result.url.trim() : '';
+          if (!url) continue;
+          const existing = sourceMap.get(url);
+          sourceMap.set(url, {
+            url,
+            title: typeof result?.title === 'string' ? result.title : existing?.title,
+            citedText: existing?.citedText,
+          });
+        }
+      }
+
+      if (block?.type === 'text' && typeof block.text === 'string' && block.text.trim()) {
+        accumulatedText.push(block.text.trim());
+      }
+
+      if (block?.type === 'text' && Array.isArray(block.citations)) {
+        for (const citation of block.citations) {
+          const url = typeof citation?.url === 'string' ? citation.url.trim() : '';
+          if (!url) continue;
+          const existing = sourceMap.get(url);
+          sourceMap.set(url, {
+            url,
+            title: typeof citation?.title === 'string' ? citation.title : existing?.title,
+            citedText: typeof citation?.cited_text === 'string' ? citation.cited_text : existing?.citedText,
+          });
+        }
+      }
+    }
+  };
+
+  try {
+    for (let continuation = 0; continuation < 4; continuation += 1) {
+      response = await meterClaudeRequest<any>(model, 'web-search', () => (client.messages as any).create({
+        model,
+        max_tokens: requestMaxTokens,
+        ...(/^claude-haiku-5-5$/i.test(model) ? { output_config: { effort: 'low' } } : {}),
+        system: options.systemPrompt || 'Use web search only as needed. Prefer reliable, directly relevant sources and do not invent unsupported facts.',
+        messages,
+        tools,
+      }, {
+        signal: discoverySignal(options.signal),
+        maxRetries: 0,
+      }));
+
+      const usage = response?.usage || {};
+      tokensUsed += Number(usage.input_tokens || 0)
+        + Number(usage.output_tokens || 0)
+        + Number(usage.cache_read_input_tokens || 0)
+        + Number(usage.cache_creation_input_tokens || 0);
+      searches += Number(usage?.server_tool_use?.web_search_requests || 0);
+      collectResponse(response);
+
+      if (response?.stop_reason === 'pause_turn') {
+        messages.push({ role: 'assistant', content: response.content });
+        continue;
+      }
+
+      if (response?.stop_reason === 'max_tokens' && options.retryTruncatedOutput !== false && !maxTokenRetryUsed && sourceMap.size === 0) {
+        maxTokenRetryUsed = true;
+        requestMaxTokens = Math.min(4096, Math.max(2048, requestMaxTokens * 2));
+        console.info('[Claude Web Search] max_tokens reached before usable source evidence; retrying once with a larger bounded output budget', {
+          model,
+          maxTokens: requestMaxTokens,
+        });
+        continue;
+      }
+
+      break;
+    }
+
+    const content = accumulatedText.join('\n').trim();
+
+    // Source/tool-result blocks are independently useful to Lexara even if
+    // Claude ran out of output tokens before producing a final prose synthesis.
+    // Preserve those sources instead of collapsing the entire research lane.
+    if (!content && sourceMap.size === 0) {
+      throw new Error(`Claude web search returned no usable text or source evidence (stop_reason=${response?.stop_reason || 'unknown'})`);
+    }
+
+    if (response?.stop_reason === 'max_tokens' && sourceMap.size > 0) {
+      console.info('[Claude Web Search] preserving source evidence after max_tokens stop', {
+        model,
+        sourceCount: sourceMap.size,
+        searches,
+      });
+    }
+
+    return {
+      content,
+      sources: [...sourceMap.values()],
+      tokensUsed,
+      searches,
+    };
+  } catch (error: any) {
+    if (options.signal?.aborted) {
+      const reason = options.signal.reason;
+      if (reason instanceof Error || reason instanceof DOMException) throw reason;
+      throw new DOMException(typeof reason === 'string' ? reason : 'Claude web search cancelled', 'AbortError');
+    }
+    console.warn('[Claude Web Search] research lane unavailable', {
+      error: error?.message || String(error),
+      status: error?.status,
+    });
+    throw Object.assign(new Error(`Claude web search error: ${error?.message || String(error)}`), {
+      status: error?.status,
+      headers: error?.headers,
+    });
+  }
+}
+
+const CLAUDE_DIRECT_IMAGE_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+]);
+
+export function claudeSupportsDirectMedia(mimeType: string, byteLength: number): boolean {
+  const type = String(mimeType || '').toLowerCase();
+  if (type === 'application/pdf') {
+    // Base64 expands the file by about one third; keep the raw file well below
+    // Anthropic's 32 MB request ceiling.
+    return byteLength > 0 && byteLength <= 20 * 1024 * 1024;
+  }
+  if (CLAUDE_DIRECT_IMAGE_TYPES.has(type)) {
+    return byteLength > 0 && byteLength <= 7 * 1024 * 1024;
+  }
+  return false;
+}
+
+export async function callClaudeMediaExtraction(input: {
+  bytes: Buffer;
+  mimeType: 'application/pdf' | 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+  fileName?: string;
+  instruction: string;
+  signal?: AbortSignal;
+}): Promise<{ content: string; tokensUsed: number }> {
+  const client = getClaudeClient();
+  const model = process.env.LEXARA_MEDIA_CLAUDE_MODEL?.trim() || LEGAL_AI_MODELS.claudeFast;
+  const base64 = input.bytes.toString('base64');
+  const mediaBlock = input.mimeType === 'application/pdf'
+    ? {
+        type: 'document',
+        source: { type: 'base64', media_type: 'application/pdf', data: base64 },
+        title: input.fileName || 'evidence.pdf',
+        citations: { enabled: true },
+      }
+    : {
+        type: 'image',
+        source: { type: 'base64', media_type: input.mimeType, data: base64 },
+      };
+
+  try {
+    const response = await meterClaudeRequest<any>(model, 'media', () => (client.messages as any).create({
+      model,
+      max_tokens: 12_000,
+      ...(/^claude-haiku-5-5$/i.test(model) ? { output_config: { effort: 'low' } } : {}),
+      messages: [{
+        role: 'user',
+        content: [
+          mediaBlock,
+          { type: 'text', text: input.instruction },
+        ],
+      }],
+    }, {
+      signal: discoverySignal(input.signal),
+      maxRetries: 0,
+    }));
+
+    const content = (response.content || [])
+      .flatMap((block: any) => block?.type === 'text' && typeof block.text === 'string' ? [block.text] : [])
+      .join('\n')
+      .trim();
+    if (!content) throw new Error('Claude media extraction returned no usable evidence content');
+
+    const usage = response.usage || {};
+    const tokensUsed = Number(usage.input_tokens || 0) + Number(usage.output_tokens || 0);
+    return { content, tokensUsed };
+  } catch (error: any) {
+    if (input.signal?.aborted) {
+      const reason = input.signal.reason;
+      if (reason instanceof Error || reason instanceof DOMException) throw reason;
+      throw new DOMException(typeof reason === 'string' ? reason : 'Claude media request cancelled', 'AbortError');
+    }
+    console.error('[Claude Media] Error:', error);
+    throw Object.assign(new Error(`Claude media extraction error: ${error?.message || String(error)}`), {
+      status: error?.status,
+      headers: error?.headers,
+    });
+  }
+}
+
+/**
+ * Stream Claude text while preserving the same final-message semantics as callClaude.
+ * Speech callbacks receive only conservative completed sentence chunks; the final
+ * tail is emitted only after Anthropic reports the message complete.
+ */
+export async function callClaudeStreaming(
+  prompt: string,
+  options: ClaudeStreamingOptions = {},
+): Promise<{ content: string; tokensUsed: number }> {
+  const client = getClaudeClient();
+  const systemPrompt = options.systemPrompt || '';
+  const jsonInstruction = options.useJSON
+    ? '\n\nIMPORTANT: Respond ONLY with valid JSON. No markdown, no explanations, just raw JSON.'
+    : '';
+  const model = options.model || CURRENT_AI_MODELS.claudeBalanced;
+  const samplingControlsDeprecated = /claude-(?:opus|sonnet|haiku)-5|claude-opus-4-(?:7|8|9)/i.test(model);
+  const effectiveEffort = /^claude-haiku-4-5/i.test(model)
+    ? undefined
+    : /^claude-haiku-5-5$/i.test(model) ? 'low' : options.effort;
+  const systemText = systemPrompt + jsonInstruction;
+  const cacheSystemPrompt = options.cacheSystemPrompt === true && systemText.length >= 2_048;
+  let speechBuffer = '';
+
+  try {
+    const stream = client.messages.stream({
+      model,
+      max_tokens: options.maxTokens || 2000,
+      ...(!samplingControlsDeprecated && options.temperature !== undefined
+        ? { temperature: options.temperature }
+        : {}),
+      ...(effectiveEffort ? { output_config: { effort: effectiveEffort } } : {}),
+      system: buildClaudeSystemBlocks(systemText, cacheSystemPrompt, options.cacheSystemPromptPrefix),
+      messages: [{ role: 'user', content: prompt }],
+    } as any, {
+      signal: discoverySignal(options.signal),
+      ...(options.providerPolicy === 'legalwhat' ? { maxRetries: 0 } : {}),
+    });
+
+    stream.on('text', (delta: string) => {
+      if (!delta) return;
+      options.onTextDelta?.(delta);
+      if (!options.onSpeechChunk) return;
+      speechBuffer += delta;
+      let boundary = findSafeSpeechBoundary(speechBuffer);
+      while (boundary >= 0) {
+        const chunk = speechBuffer.slice(0, boundary).trim();
+        speechBuffer = speechBuffer.slice(boundary).trimStart();
+        if (chunk) options.onSpeechChunk(chunk);
+        boundary = findSafeSpeechBoundary(speechBuffer);
+      }
+    });
+
+    const response = await meterClaudeRequest<any>(model, 'streaming', () => stream.finalMessage());
+    const content = response.content
+      .flatMap(block =>
+        block.type === 'text' && typeof (block as any).text === 'string'
+          ? [(block as any).text]
+          : []
+      )
+      .join('\n')
+      .trim();
+
+    if (!content) {
+      const blockTypes = response.content.map(block => block.type).join(',') || 'none';
+      throw new Error(
+        `Claude returned no text content block (stop_reason=${response.stop_reason || 'unknown'}, blocks=${blockTypes})`,
+      );
+    }
+
+    if (options.onSpeechChunk && speechBuffer.trim()) {
+      options.onSpeechChunk(speechBuffer.trim());
+      speechBuffer = '';
+    }
+
+    const usage = response.usage as any;
+    const inputTokens = Number(usage.input_tokens || 0);
+    const outputTokens = Number(usage.output_tokens || 0);
+    const cacheReadInputTokens = Number(usage.cache_read_input_tokens || 0);
+    const cacheCreationInputTokens = Number(usage.cache_creation_input_tokens || 0);
+    const tokensUsed = inputTokens + outputTokens + cacheReadInputTokens + cacheCreationInputTokens;
+
+    console.info('[Claude Streaming]', {
+      model,
+      effort: effectiveEffort || 'provider-default',
+      inputTokens,
+      outputTokens,
+      cacheReadInputTokens,
+      cacheCreationInputTokens,
+    });
+
+    return { content, tokensUsed };
+  } catch (error: any) {
+    if (options.signal?.aborted) {
+      const reason = options.signal.reason;
+      if (reason instanceof Error || reason instanceof DOMException) throw reason;
+      throw new DOMException(
+        typeof reason === 'string' ? reason : 'Claude request cancelled',
+        'AbortError',
+      );
+    }
+    console.error('[Claude Streaming] Error:', error);
+    throw Object.assign(new Error(`Claude API error: ${error.message}`), { headers: error.headers, status: error.status });
+  }
+}
+
+/**
+ * Generate structured JSON using Claude
+ */
+export async function generateClaudeJSON<T = any>(
+  prompt: string,
+  options: ClaudeOptions = {}
+): Promise<T> {
+  const { content } = await callClaude(prompt, { ...options, useJSON: true });
+  
+  try {
+    // Clean up markdown code blocks if present
+    let cleanJson = content;
+    if (cleanJson.includes('```json')) {
+      cleanJson = cleanJson.replace(/```json\n?/g, '').replace(/```/g, '').trim();
+    }
+    
+    return JSON.parse(cleanJson);
+  } catch (error) {
+    console.error('[Claude] Failed to parse JSON response:', content);
+    throw new Error('Invalid JSON response from Claude');
+  }
+}
+
+/**
+ * Generate legal document using Claude
+ */
+export async function generateClaudeLegalDocument(
+  prompt: string,
+  systemPrompt: string,
+  maxTokens: number = 4000
+): Promise<string> {
+  const { content } = await callClaude(prompt, {
+    systemPrompt,
+    maxTokens,
+    temperature: 0.7,
+    model: process.env.LEXARA_CLAUDE_MODEL?.trim() || CURRENT_AI_MODELS.claudeBalanced, // Use Sonnet for complex legal work
+  });
+  
+  return content;
+}
+
+/**
+ * Generate legal consultation using Claude
+ */
+export async function generateClaudeLegalConsultation(
+  prompt: string,
+  systemPrompt: string
+): Promise<string> {
+  const { content } = await callClaude(prompt, {
+    systemPrompt,
+    maxTokens: 3000,
+    temperature: 0.7,
+    model: process.env.LEXARA_CLAUDE_MODEL?.trim() || CURRENT_AI_MODELS.claudeBalanced,
+  });
+  
+  return content;
+}

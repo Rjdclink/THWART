@@ -1,0 +1,336 @@
+import { randomUUID } from 'node:crypto';
+import logger from '../../../logger.js';
+import {
+  assertCoinbaseSpotTradeReady,
+  coinbasePrivateRequest,
+} from '../intelligence/coinbase-advanced-trade-authority.js';
+import {
+  getCachedCoinbaseAdvancedProductId,
+  getCoinbaseAdvancedProductConstraints,
+} from '../intelligence/coinbase-advanced-market-data.js';
+import { trackSubmittedPrivateCexOrder } from '../intelligence/cex-private-execution-feedback.js';
+import {
+  isCoinbaseConvertReceipt,
+  prepareCoinbaseConvertAuctionAgainstFallback,
+  queryCoinbaseConvertSettlement,
+} from './coinbase-convert-execution-auction.js';
+import { validateCoinbaseOrderAgainstProduct } from './coinbase-product-policy.js';
+import type {
+  ExecutionFill,
+  ExecutionStatus,
+  NormalizedOrderSettlement,
+} from './settlement-types.js';
+
+export interface CoinbaseOrderRequest {
+  symbol: string;
+  side: 'buy' | 'sell';
+  quantity: number;
+  price: number;
+  /** Exact live Coinbase product id; production resolves this from live metadata. */
+  productId?: string;
+}
+
+export interface CoinbaseOrderReceipt {
+  venue: 'coinbase';
+  orderId: string;
+  symbol: string;
+  productId?: string;
+  side: 'buy' | 'sell';
+  requestedQuantity: number;
+  submittedAt: number;
+}
+
+export type CoinbasePrivateRequester = typeof coinbasePrivateRequest;
+
+function finite(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function positive(value: unknown): number | null {
+  const parsed = finite(value);
+  return parsed !== null && parsed > 0 ? parsed : null;
+}
+
+function explicitProductId(value: unknown): string | null {
+  const raw = String(value ?? '').trim().toUpperCase().replace(/[\/_]/g, '-');
+  const parts = raw.split('-').filter(Boolean);
+  if (parts.length !== 2 || parts.some(part => !/^[A-Z0-9]+$/.test(part))) return null;
+  return `${parts[0]}-${parts[1]}`;
+}
+
+/**
+ * Compatibility boundary for legacy synchronous callers. This never infers a
+ * product from a quote-currency suffix: it succeeds only for an explicit product
+ * id or a product identity already resolved from fresh Coinbase metadata.
+ */
+export function coinbaseProductId(symbol: string): string {
+  const explicit = explicitProductId(symbol);
+  if (explicit) return explicit;
+  const cached = getCachedCoinbaseAdvancedProductId(symbol);
+  if (!cached) throw new Error(`Coinbase product id for ${symbol} is not present in the live metadata cache`);
+  return cached;
+}
+
+export function coinbaseDecimalString(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) throw new Error('Coinbase order values must be finite and positive');
+  const canonical = value.toString().toLowerCase();
+  if (!canonical.includes('e')) return canonical;
+
+  const [coefficient, exponentText] = canonical.split('e');
+  const exponent = Number(exponentText);
+  if (!Number.isInteger(exponent)) throw new Error('Coinbase order value has an invalid numeric exponent');
+  const [whole, fraction = ''] = coefficient.split('.');
+  const digits = `${whole}${fraction}`;
+  const decimalIndex = whole.length + exponent;
+  if (decimalIndex <= 0) return `0.${'0'.repeat(-decimalIndex)}${digits}`;
+  if (decimalIndex >= digits.length) return `${digits}${'0'.repeat(decimalIndex - digits.length)}`;
+  return `${digits.slice(0, decimalIndex)}.${digits.slice(decimalIndex)}`;
+}
+
+function timestamp(value: unknown): number | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function classify(row: any, requestedQuantity: number): { status: ExecutionStatus; terminal: boolean } {
+  const raw = String(row?.status || '').trim().toUpperCase();
+  const filled = finite(row?.filled_size) ?? 0;
+  const complete = requestedQuantity > 0 && filled >= requestedQuantity * (1 - 1e-8);
+  if (raw.includes('REJECT') || raw === 'FAILED') return { status: 'rejected', terminal: true };
+  if (complete && row?.settled === true) return { status: 'filled', terminal: true };
+  if (row?.settled === true || ['FILLED', 'CANCELLED', 'CANCELED', 'EXPIRED'].includes(raw)) {
+    if (filled > 0) return { status: complete ? 'filled' : 'partially_filled', terminal: true };
+    return { status: raw === 'FILLED' ? 'failed' : 'cancelled', terminal: true };
+  }
+  if (filled > 0) return { status: 'partially_filled', terminal: false };
+  return { status: 'submitted', terminal: false };
+}
+
+export function parseCoinbaseFills(payload: any, orderId: string): ExecutionFill[] {
+  return (Array.isArray(payload?.fills) ? payload.fills : [])
+    .filter((fill: any) => String(fill?.order_id || '') === orderId)
+    .map((fill: any) => ({
+      quantity: positive(fill?.size) || 0,
+      price: positive(fill?.price) || 0,
+      feeAmount: finite(fill?.commission),
+      feeAsset: typeof fill?.product_id === 'string'
+        ? fill.product_id.trim().toUpperCase().split('-')[1] || null
+        : null,
+      timestamp: timestamp(fill?.trade_time),
+      tradeId: typeof fill?.trade_id === 'string' ? fill.trade_id : undefined,
+    }))
+    .filter((fill: ExecutionFill) => fill.quantity > 0 && fill.price > 0);
+}
+
+function aggregateFee(fills: ExecutionFill[], fallback: unknown): number | null {
+  if (fills.length === 0) return finite(fallback);
+  if (fills.some(fill => fill.feeAmount === null)) return null;
+  return fills.reduce((sum, fill) => sum + (fill.feeAmount || 0), 0);
+}
+
+function aggregateFeeAsset(fills: ExecutionFill[], productId: string | null): string | null {
+  const assets = fills.map(fill => fill.feeAsset).filter((value): value is string => Boolean(value));
+  if (assets.length === 0) return productId?.split('-')[1] || null;
+  const first = assets[0].toUpperCase();
+  return assets.every(asset => asset.toUpperCase() === first) ? first : null;
+}
+
+export function parseCoinbaseOrderSettlement(input: {
+  receipt: CoinbaseOrderReceipt;
+  orderPayload: any;
+  fillsPayload?: any;
+  finalBalances?: Record<string, string>;
+}): NormalizedOrderSettlement {
+  const row = input.orderPayload?.order;
+  if (!row) throw new Error(`Coinbase returned no order state for ${input.receipt.orderId}`);
+  const requestedQuantity = positive(row?.order_configuration?.sor_limit_ioc?.base_size)
+    ?? positive(row?.order_configuration?.limit_limit_fok?.base_size)
+    ?? positive(row?.order_configuration?.limit_limit_gtc?.base_size)
+    ?? input.receipt.requestedQuantity;
+  const filledQuantity = Math.max(0, finite(row?.filled_size) ?? 0);
+  const averageFillPrice = positive(row?.average_filled_price);
+  const rowProductId = typeof row?.product_id === 'string' ? explicitProductId(row.product_id) : null;
+  const productId = rowProductId || explicitProductId(input.receipt.productId) || null;
+  const fills = parseCoinbaseFills(input.fillsPayload || {}, input.receipt.orderId);
+  const classification = classify(row, requestedQuantity);
+  const totalFee = aggregateFee(fills, row?.total_fees);
+  const createdAt = timestamp(row?.created_time) ?? input.receipt.submittedAt;
+  const terminalAt = classification.terminal
+    ? timestamp(row?.last_fill_time) ?? timestamp(row?.end_time) ?? Date.now()
+    : null;
+  const rejectMessage = typeof row?.reject_message === 'string' && row.reject_message.trim()
+    ? row.reject_message.trim()
+    : typeof row?.cancel_message === 'string' && row.cancel_message.trim()
+      ? row.cancel_message.trim()
+      : undefined;
+
+  return {
+    venue: 'coinbase',
+    orderId: input.receipt.orderId,
+    symbol: input.receipt.symbol,
+    side: input.receipt.side,
+    status: classification.status,
+    terminal: classification.terminal,
+    requestedQuantity,
+    filledQuantity,
+    remainingQuantity: Math.max(0, requestedQuantity - filledQuantity),
+    averageFillPrice,
+    fills,
+    feeAmount: totalFee,
+    feeAsset: aggregateFeeAsset(fills, productId),
+    submittedAt: createdAt,
+    terminalAt,
+    finalBalances: input.finalBalances,
+    error: rejectMessage,
+  };
+}
+
+async function readCoinbaseBalances(requester: CoinbasePrivateRequester): Promise<Record<string, string>> {
+  const payload = await requester('/api/v3/brokerage/accounts', 'GET', { query: { limit: '250' } });
+  const output: Record<string, string> = {};
+  for (const account of Array.isArray(payload?.accounts) ? payload.accounts : []) {
+    const currency = typeof account?.currency === 'string' ? account.currency.trim().toUpperCase() : '';
+    const available = account?.available_balance?.value;
+    if (!currency || !Number.isFinite(Number(available))) continue;
+    output[currency] = String(available);
+  }
+  return output;
+}
+
+export class CoinbaseSpotSettlementAdapter {
+  constructor(private readonly requester: CoinbasePrivateRequester = coinbasePrivateRequest) {}
+
+  private async resolveProductForSubmission(request: CoinbaseOrderRequest): Promise<string> {
+    let productId = explicitProductId(request.productId);
+    if (this.requester === coinbasePrivateRequest) {
+      await assertCoinbaseSpotTradeReady();
+      const constraints = await getCoinbaseAdvancedProductConstraints(request.symbol, true);
+      const constraintCheck = validateCoinbaseOrderAgainstProduct(
+        { quantity: request.quantity, price: request.price },
+        constraints,
+      );
+      if (!constraintCheck.valid) {
+        throw new Error(`Coinbase order violates current product constraints: ${constraintCheck.reason}`);
+      }
+      productId = constraints.productId;
+    }
+    if (!productId) {
+      throw new Error('Coinbase injected settlement requester requires an explicit exact productId; product IDs are not inferred from quote suffixes');
+    }
+    return productId;
+  }
+
+  private async submitIoc(request: CoinbaseOrderRequest, productId: string): Promise<CoinbaseOrderReceipt> {
+    const submittedAt = Date.now();
+    const payload = await this.requester('/api/v3/brokerage/orders', 'POST', {
+      body: {
+        client_order_id: randomUUID(),
+        product_id: productId,
+        side: request.side.toUpperCase(),
+        order_configuration: {
+          sor_limit_ioc: {
+            base_size: coinbaseDecimalString(request.quantity),
+            limit_price: coinbaseDecimalString(request.price),
+          },
+        },
+      },
+    });
+    if (payload?.success !== true || !payload?.success_response?.order_id) {
+      const message = payload?.error_response?.message || payload?.error_response?.error_details || 'unknown Coinbase order rejection';
+      throw new Error(`Coinbase rejected IOC order: ${String(message)}`);
+    }
+    const receipt: CoinbaseOrderReceipt = {
+      venue: 'coinbase',
+      orderId: String(payload.success_response.order_id),
+      symbol: request.symbol,
+      productId,
+      side: request.side,
+      requestedQuantity: request.quantity,
+      submittedAt,
+    };
+    // The REST response remains submission authority. Tracking only canonical
+    // production requests lazily starts the separate read-only user WebSocket;
+    // injected test requesters never create external socket activity.
+    if (this.requester === coinbasePrivateRequest) trackSubmittedPrivateCexOrder(receipt);
+    return receipt;
+  }
+
+  async prepareSubmit(request: CoinbaseOrderRequest) {
+    const productId = await this.resolveProductForSubmission(request);
+    const fallback = {
+      transport: 'rest' as const,
+      preparedAt: Date.now(),
+      dispatch: () => this.submitIoc(request, productId),
+    };
+    if (this.requester !== coinbasePrivateRequest) return fallback;
+    return prepareCoinbaseConvertAuctionAgainstFallback({ request, fallback });
+  }
+
+  async submit(request: CoinbaseOrderRequest): Promise<CoinbaseOrderReceipt> {
+    const prepared = await this.prepareSubmit(request);
+    return prepared.dispatch() as Promise<CoinbaseOrderReceipt>;
+  }
+
+  async query(receipt: CoinbaseOrderReceipt): Promise<NormalizedOrderSettlement> {
+    if (this.requester === coinbasePrivateRequest && isCoinbaseConvertReceipt(receipt.orderId)) {
+      const settlement = await queryCoinbaseConvertSettlement(receipt);
+      if (!settlement) throw new Error(`Coinbase Convert receipt ${receipt.orderId} could not be decoded`);
+      if (!settlement.terminal) return settlement;
+      try {
+        return { ...settlement, finalBalances: await this.getBalances() };
+      } catch (error) {
+        logger.warn('[Coinbase Convert] Final balance snapshot unavailable after terminal conversion', {
+          component: 'CoinbaseSpotSettlementAdapter',
+          orderId: receipt.orderId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return settlement;
+      }
+    }
+
+    const orderPayload = await this.requester(`/api/v3/brokerage/orders/historical/${encodeURIComponent(receipt.orderId)}`, 'GET');
+    let fillsPayload: any = {};
+    try {
+      fillsPayload = await this.requester('/api/v3/brokerage/orders/historical/fills', 'GET', {
+        query: { order_ids: [receipt.orderId], limit: '100' },
+      });
+    } catch (error) {
+      logger.warn('[Coinbase] Fill details unavailable; aggregate terminal fee will be retained if present', {
+        component: 'CoinbaseSpotSettlementAdapter',
+        orderId: receipt.orderId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    const provisional = parseCoinbaseOrderSettlement({ receipt, orderPayload, fillsPayload });
+    if (!provisional.terminal) return provisional;
+    let finalBalances: Record<string, string> | undefined;
+    try {
+      finalBalances = await this.getBalances();
+    } catch (error) {
+      logger.warn('[Coinbase] Final balance snapshot unavailable after terminal order', {
+        component: 'CoinbaseSpotSettlementAdapter',
+        orderId: receipt.orderId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return parseCoinbaseOrderSettlement({ receipt, orderPayload, fillsPayload, finalBalances });
+  }
+
+  async cancel(receipt: CoinbaseOrderReceipt): Promise<void> {
+    if (isCoinbaseConvertReceipt(receipt.orderId)) return;
+    const payload = await this.requester('/api/v3/brokerage/orders/batch_cancel', 'POST', {
+      body: { order_ids: [receipt.orderId] },
+    });
+    const result = Array.isArray(payload?.results) ? payload.results.find((row: any) => row?.order_id === receipt.orderId) : null;
+    if (result && result.success === false) {
+      throw new Error(`Coinbase cancel rejected: ${result.failure_reason || 'unknown failure'}`);
+    }
+  }
+
+  async getBalances(): Promise<Record<string, string>> {
+    return readCoinbaseBalances(this.requester);
+  }
+}

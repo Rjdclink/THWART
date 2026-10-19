@@ -1,0 +1,67 @@
+node_modules
+.tools/
+dist
+.DS_Store
+server/public
+vite.config.ts.*
+*.tar.gz
+test-*.mjs
+test-*.js
+test-*.ts
+test_*.ts
+
+# Core dumps / crash artifacts
+core
+core.*
+
+# Build artifacts in public/ directory
+# (Keep public/images and other git-tracked files, but ignore build output)
+public/assets/
+public/index.html
+
+# Environment variables (contains sensitive secrets)
+.env
+.env.local
+.env.production
+
+# Application logs
+logs/
+*.log
+
+# Core dumps (should never be committed)
+core
+core.*
+
+# Backup files
+*.backup
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+data/
+storage/
+!server/services/storage/
+
+# Uploads directory (Stage 2A - Media Upload System)
+uploads/
+!uploads/.gitkeep
+
+# Test output directories
+test-output/
+evidence-maps/
+
+# Volume Engine cache
+.cache/test-opportunity-system.mjs
+.cache/test-elite-scanner.ts
+
+# Core dumps
+core
+core.*
+*.core
+
+# People Search cache
+.cache/people-search/
+
+# Local provider verification environment
+.spectra-crawl4ai/

@@ -1,0 +1,1650 @@
+/**
+ * STAGE MANAGEMENT SYSTEM
+ *
+ * Controls the 6-stage progressive deployment of Cryptara trading system.
+ * Stage progression controls scale, proof, and learning. It does not create a
+ * second profitability veto once a candidate has passed canonical hard facts.
+ *
+ * STAGE 1: Constrained live positive-execution pilot
+ * STAGE 2: Proof-of-Signal
+ * STAGE 3: Measured expansion
+ * STAGE 4: Limited autonomy
+ * STAGE 5: Supervised scaling
+ * STAGE 6: Conditional autonomy
+ *
+ * GLOBAL RULES (All Stages):
+ * - One canonical stage/pause/kill-switch authority
+ * - No profit ceiling or cycle-completion execution halt
+ * - Stage advancement does not pause otherwise-qualified execution
+ * - Advisory uncertainty, historical performance and Monte Carlo signals cannot
+ *   independently veto execution or Stage-2+ advancement
+ * - Hard circuit-breaker, kill-switch, blocking-anomaly, funding, inventory,
+ *   atomicity, and settlement facts remain authoritative where applicable
+ */
+
+import { EventEmitter } from 'events';
+import { createLogger } from '../../../logger';
+import { randomUUID } from 'crypto';
+import type { StageManagerPersistedSnapshot, StageManagerStateStore } from './stage-state-store.js';
+import type { ExecutionStatus, NormalizedRealizedExecution } from '../execution/settlement-types.js';
+import type { InitialGasReadiness, InitialGasReadinessStatus } from '../initial-gas-readiness.js';
+
+const log = createLogger('StageManagement');
+
+// ============================================================================
+// STAGE DEFINITIONS
+// ============================================================================
+
+export enum Stage {
+  STAGE_1_CONSTRAINED_PILOT = 1,
+  STAGE_2_PROOF_OF_SIGNAL = 2,
+  STAGE_3_MEASURED_DRYRUN = 3,
+  STAGE_4_LIMITED_AUTONOMY = 4,
+  STAGE_5_SUPERVISED_SCALING = 5,
+  STAGE_6_CONDITIONAL_AUTONOMY = 6,
+}
+
+export interface StageConfig {
+  stage: Stage;
+  stageName: string;
+  description: string;
+
+  // Execution Authority
+  canExecuteTrades: boolean;
+  requiresHumanApproval: boolean;
+  requiresExplicitUnpause: boolean;
+
+  // Scope Limits
+  maxPairsAllowed: number;
+  maxVenuesAllowed: number;
+  allowedChains: string[];
+
+  // Profit Tier Limits (telemetry/advancement targets only; never execution ceilings)
+  minDailyProfit: number;
+  maxDailyProfit: number;
+
+  // Risk Parameters
+  maxPositionSizeUSD: number;
+  maxDrawdownPercent: number;
+  /** Compatibility telemetry flag. Monte Carlo never owns execution/advancement authority. */
+  requiresMonteCarloConsensus: boolean;
+
+  // Autonomy Level
+  autonomyLevel: 'none' | 'advisory' | 'limited' | 'conditional' | 'full';
+
+  // Memory & Evolution
+  memoryPartitioned: boolean;
+  evolutionLocked: boolean;
+  canSelfExpand: boolean;
+
+  // Safety Gates
+  anomalyDetectionRequired: boolean;
+  automaticPauseAfterCycle: boolean;
+  killSwitchArmed: boolean;
+}
+
+// ============================================================================
+// STAGE CONFIGURATIONS
+// ============================================================================
+
+export const STAGE_CONFIGS: Record<Stage, StageConfig> = {
+  [Stage.STAGE_1_CONSTRAINED_PILOT]: {
+    stage: Stage.STAGE_1_CONSTRAINED_PILOT,
+    stageName: 'Constrained Pilot',
+    description: 'Constrained LIVE positive-execution pilot - current hard evidence only',
+
+    canExecuteTrades: true,
+    requiresHumanApproval: false,
+    requiresExplicitUnpause: false,
+
+    maxPairsAllowed: 5,
+    maxVenuesAllowed: 3,
+    allowedChains: ['ethereum', 'polygon', 'arbitrum', 'optimism', 'bsc', 'avalanche'],
+
+    minDailyProfit: 0,
+    maxDailyProfit: 200,
+
+    maxPositionSizeUSD: 100,
+    maxDrawdownPercent: 5,
+    requiresMonteCarloConsensus: false,
+
+    autonomyLevel: 'limited',
+
+    memoryPartitioned: true,
+    evolutionLocked: true,
+    canSelfExpand: false,
+
+    anomalyDetectionRequired: true,
+    automaticPauseAfterCycle: false,
+    killSwitchArmed: true,
+  },
+
+  [Stage.STAGE_2_PROOF_OF_SIGNAL]: {
+    stage: Stage.STAGE_2_PROOF_OF_SIGNAL,
+    stageName: 'Proof-of-Signal Activation',
+    description: 'Live execution inside canonical measured execution bounds without historical-performance gates',
+
+    canExecuteTrades: true,
+    requiresHumanApproval: false,
+    requiresExplicitUnpause: false,
+
+    maxPairsAllowed: 10,
+    maxVenuesAllowed: 3,
+    allowedChains: ['polygon', 'arbitrum', 'europa'],
+
+    minDailyProfit: 200,
+    maxDailyProfit: 500,
+
+    maxPositionSizeUSD: 100,
+    maxDrawdownPercent: 5,
+    requiresMonteCarloConsensus: false,
+
+    autonomyLevel: 'limited',
+
+    memoryPartitioned: true,
+    evolutionLocked: true,
+    canSelfExpand: false,
+
+    anomalyDetectionRequired: true,
+    automaticPauseAfterCycle: false,
+    killSwitchArmed: true,
+  },
+
+  [Stage.STAGE_3_MEASURED_DRYRUN]: {
+    stage: Stage.STAGE_3_MEASURED_DRYRUN,
+    stageName: 'Measured Dry-Run Expansion',
+    description: 'Incremental scope widening with measured controls',
+
+    canExecuteTrades: true,
+    requiresHumanApproval: false,
+    requiresExplicitUnpause: false,
+
+    maxPairsAllowed: 20,
+    maxVenuesAllowed: 5,
+    allowedChains: ['polygon', 'arbitrum', 'optimism', 'europa'],
+
+    minDailyProfit: 500,
+    maxDailyProfit: 1500,
+
+    maxPositionSizeUSD: 500,
+    maxDrawdownPercent: 10,
+    requiresMonteCarloConsensus: false,
+
+    autonomyLevel: 'limited',
+
+    memoryPartitioned: true,
+    evolutionLocked: true,
+    canSelfExpand: false,
+
+    anomalyDetectionRequired: true,
+    automaticPauseAfterCycle: false,
+    killSwitchArmed: true,
+  },
+
+  [Stage.STAGE_4_LIMITED_AUTONOMY]: {
+    stage: Stage.STAGE_4_LIMITED_AUTONOMY,
+    stageName: 'Limited Autonomy Restoration',
+    description: 'Narrow conditional autonomy inside defined corridors',
+
+    canExecuteTrades: true,
+    requiresHumanApproval: false,
+    requiresExplicitUnpause: false,
+
+    maxPairsAllowed: 50,
+    maxVenuesAllowed: 10,
+    allowedChains: ['polygon', 'arbitrum', 'optimism', 'avalanche', 'europa'],
+
+    minDailyProfit: 1500,
+    maxDailyProfit: 5000,
+
+    maxPositionSizeUSD: 2000,
+    maxDrawdownPercent: 12,
+    requiresMonteCarloConsensus: false,
+
+    autonomyLevel: 'conditional',
+
+    memoryPartitioned: true,
+    evolutionLocked: true,
+    canSelfExpand: false,
+
+    anomalyDetectionRequired: true,
+    automaticPauseAfterCycle: false,
+    killSwitchArmed: true,
+  },
+
+  [Stage.STAGE_5_SUPERVISED_SCALING]: {
+    stage: Stage.STAGE_5_SUPERVISED_SCALING,
+    stageName: 'Supervised Scaling',
+    description: 'Sequential unlocking of higher profit tiers',
+
+    canExecuteTrades: true,
+    requiresHumanApproval: false,
+    requiresExplicitUnpause: false,
+
+    maxPairsAllowed: 100,
+    maxVenuesAllowed: 15,
+    allowedChains: ['polygon', 'arbitrum', 'optimism', 'avalanche', 'bsc', 'europa'],
+
+    minDailyProfit: 5000,
+    maxDailyProfit: 15000,
+
+    maxPositionSizeUSD: 5000,
+    maxDrawdownPercent: 15,
+    requiresMonteCarloConsensus: false,
+
+    autonomyLevel: 'conditional',
+
+    memoryPartitioned: true,
+    evolutionLocked: true,
+    canSelfExpand: false,
+
+    anomalyDetectionRequired: true,
+    automaticPauseAfterCycle: false,
+    killSwitchArmed: true,
+  },
+
+  [Stage.STAGE_6_CONDITIONAL_AUTONOMY]: {
+    stage: Stage.STAGE_6_CONDITIONAL_AUTONOMY,
+    stageName: 'Conditional Autonomy',
+    description: 'Full autonomy permitted while hard metrics remain within bounds',
+
+    canExecuteTrades: true,
+    requiresHumanApproval: false,
+    requiresExplicitUnpause: false,
+
+    maxPairsAllowed: 200,
+    maxVenuesAllowed: 25,
+    allowedChains: ['polygon', 'arbitrum', 'optimism', 'avalanche', 'bsc', 'ethereum', 'europa'],
+
+    minDailyProfit: 15000,
+    maxDailyProfit: 35000,
+
+    maxPositionSizeUSD: 10000,
+    maxDrawdownPercent: 15,
+    requiresMonteCarloConsensus: false,
+
+    autonomyLevel: 'full',
+
+    memoryPartitioned: false,
+    evolutionLocked: true,
+    canSelfExpand: false,
+
+    anomalyDetectionRequired: true,
+    automaticPauseAfterCycle: false,
+    killSwitchArmed: true,
+  },
+};
+
+// ============================================================================
+// STAGE STATE
+// ============================================================================
+
+export interface StageState {
+  currentStage: Stage;
+  isPaused: boolean;
+  pauseReason?: string;
+  lastPauseTimestamp?: number;
+  unpauseRequiresAuthorization: boolean;
+  activationMode: 'automatic' | 'manual' | 'none';
+  activatedAt?: number;
+  manualHold: boolean;
+
+  // Authorization tracking
+  lastUnpauseTimestamp?: number;
+  lastUnpauseAuthority?: string;
+  lastUnpauseScope?: string;
+  lastUnpauseDuration?: number;
+
+  // Cycle tracking
+  cycleCount: number;
+  lastCycleStartTime?: number;
+  lastCycleEndTime?: number;
+
+  // Performance tracking
+  dailyProfitUSD: number;
+  totalProfitUSD: number;
+  currentDrawdownPercent: number;
+
+  // Metrics for advancement
+  proofMetrics: ProofMetrics;
+
+  // Anomaly tracking
+  anomalyCount: number;
+  lastAnomalyTime?: number;
+  lastAnomalyReason?: string;
+  blockingAnomaly: boolean;
+  killSwitchActive: boolean;
+  uncertainties: string[];
+
+  initialGasReady: boolean;
+  initialGasReadinessStatus: InitialGasReadinessStatus;
+  initialGasReadinessObservedAt?: number;
+
+  automaticAdvancementEvidence: AutomaticAdvancementEvidence | null;
+  automaticAdvancementBlockers: string[];
+  cryptaraExecutionEvidence: PersistedCryptaraExecutionEvidence[];
+  profitLadderState: Record<string, unknown> | null;
+}
+
+export interface ProofMetrics {
+  successRate: number;
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  avgProfitPerTrade: number;
+  sharpeRatio: number;
+  maxDrawdown: number;
+  uptime: number;
+
+  // Historical/Monte Carlo metrics are telemetry only for Stage 2+.
+  monteCarloPassRate: number;
+  monteCarloSimulations: number;
+  liveValidationSamples: number;
+  liveValidationPasses: number;
+  liveValidationPassRate: number;
+  chainHealthy: boolean;
+  lastLiveValidationAt?: number;
+
+  // Hard stage-readiness result.
+  meetsAdvancementCriteria: boolean;
+}
+
+export interface CryptaraRankingEvidence {
+  evaluatedAt: number;
+  sampleCount: number;
+  successfulExecutions: number;
+  successRate: number;
+  averageNetProfitUsd: number;
+  averageSlippageBps: number | null;
+  preferredChains: string[];
+  preferredExecutionModes: Array<'standard' | 'zero_capital' | 'flashbots'>;
+  riskBudget: 'defensive' | 'balanced' | 'aggressive';
+  notionalMultiplier: number;
+  maxSlippageBps: number;
+  chainPerformance: Array<{
+    chain: string;
+    netRealizedProfitUsd: number;
+    successfulExecutions: number;
+    totalExecutions: number;
+    rankingScore: number;
+  }>;
+}
+
+export interface AutomaticAdvancementEvidence {
+  evaluatedAt: number;
+  marketGate: {
+    decision: 'ALLOW' | 'BLOCK';
+    evaluatedAt: number;
+    reasons: string[];
+  };
+  cryptara: CryptaraRankingEvidence;
+  profitLadder: {
+    currentTierId: number;
+    readyForNextTier: boolean;
+    blockers: string[];
+  };
+  risk: {
+    circuitBreakersClear: boolean;
+    trippedCircuitBreakers: string[];
+  };
+}
+
+export interface AutomaticAdvancementResult {
+  advanced: boolean;
+  fromStage: Stage;
+  toStage?: Stage;
+  blockers: string[];
+}
+
+export interface PersistedCryptaraExecutionEvidence {
+  source: 'master_pipeline' | 'zero_capital' | 'flash_loan' | 'manual';
+  opportunityId?: string;
+  chain: string;
+  symbol: string;
+  strategy: string;
+  success: boolean;
+  expectedProfitUsd: number;
+  realizedProfitUsd: number | null;
+  feeUsd: number | null;
+  slippageBps: number | null;
+  latencyMs: number;
+  usedZeroCapital: boolean;
+  timestamp: number;
+  notes?: string;
+  settlementStatus?: string;
+  settlementConfirmed?: boolean;
+  provenance?: string[];
+  settlement?: NormalizedRealizedExecution;
+}
+
+// ============================================================================
+// STAGE MANAGER
+// ============================================================================
+
+export class StageManager extends EventEmitter {
+  private static instance: StageManager | null = null;
+  private state: StageState;
+  private config: StageConfig;
+  private stateHistory: Array<{ timestamp: number; state: Partial<StageState> }> = [];
+  private stateStore: StageManagerStateStore | null = null;
+  private persistenceTail: Promise<void> = Promise.resolve();
+
+  private constructor() {
+    super();
+    this.state = this.createInitialState();
+    this.config = STAGE_CONFIGS[Stage.STAGE_1_CONSTRAINED_PILOT];
+
+    log.info('Stage Manager initialized', {
+      stage: this.config.stageName,
+      isPaused: this.state.isPaused,
+      stageOneLiveExecution: this.config.canExecuteTrades,
+      profitCeilingExecutionAuthority: false,
+      monteCarloExecutionAuthority: false,
+      historicalPerformanceAdvancementAuthority: false,
+      automaticCyclePauseAuthority: false,
+    });
+  }
+
+  static getInstance(): StageManager {
+    if (!StageManager.instance) {
+      StageManager.instance = new StageManager();
+    }
+    return StageManager.instance;
+  }
+
+  async restorePersistence(store: StageManagerStateStore): Promise<boolean> {
+    this.stateStore = store;
+    const snapshot = await store.load();
+    if (!snapshot) {
+      await this.persistState();
+      return false;
+    }
+
+    this.importState(snapshot);
+    await this.persistState();
+    return true;
+  }
+
+  async flushPersistence(): Promise<void> {
+    await this.persistenceTail;
+  }
+
+  // ============================================================================
+  // PAUSE / UNPAUSE CONTROL
+  // ============================================================================
+
+  async requestUnpause(
+    authority: string,
+    scope: string,
+    duration: number = 0
+  ): Promise<{ success: boolean; message: string }> {
+    if (!this.state.isPaused) {
+      return {
+        success: false,
+        message: 'System is already running',
+      };
+    }
+
+    if (!authority || authority.length === 0) {
+      return {
+        success: false,
+        message: 'Invalid authority - UNPAUSE requires human operator ID',
+      };
+    }
+
+    if (!scope || scope.length === 0) {
+      return {
+        success: false,
+        message: 'Invalid scope - UNPAUSE requires explicit scope definition',
+      };
+    }
+
+    log.info('Manual UNPAUSE request received', {
+      stage: this.config.stageName,
+      authority,
+      scope,
+      duration,
+    });
+
+    this.state.isPaused = false;
+    this.state.pauseReason = undefined;
+    this.state.lastUnpauseTimestamp = Date.now();
+    this.state.lastUnpauseAuthority = authority;
+    this.state.lastUnpauseScope = scope;
+    this.state.lastUnpauseDuration = duration;
+    this.state.unpauseRequiresAuthorization = false;
+    this.state.activationMode = 'manual';
+    this.state.activatedAt = Date.now();
+    this.state.manualHold = false;
+
+    if (duration > 0) {
+      setTimeout(() => {
+        this.pause('Duration expired', { manualOverride: true });
+      }, duration);
+    }
+
+    this.emit('unpaused', {
+      stage: this.state.currentStage,
+      authority,
+      scope,
+      duration,
+      automatic: false,
+      timestamp: Date.now(),
+    });
+
+    this.recordStateChange({ isPaused: false, activationMode: 'manual', manualHold: false });
+    await this.persistState();
+
+    return {
+      success: true,
+      message: `System manually activated by ${authority} for scope: ${scope}`,
+    };
+  }
+
+  private activateAutomatically(reason: string, evidence?: AutomaticAdvancementEvidence): void {
+    this.state.isPaused = false;
+    this.state.pauseReason = undefined;
+    this.state.unpauseRequiresAuthorization = false;
+    this.state.activationMode = 'automatic';
+    this.state.activatedAt = Date.now();
+    this.state.manualHold = false;
+    this.emit('unpaused', {
+      stage: this.state.currentStage,
+      authority: 'system',
+      scope: reason,
+      duration: 0,
+      automatic: true,
+      evidence,
+      timestamp: this.state.activatedAt,
+    });
+  }
+
+  /**
+   * Pause remains a real authority only when explicitly invoked by an operator,
+   * kill-switch/circuit-breaker, or other concrete hard-failure owner.
+   */
+  pause(reason: string, options?: { manualOverride?: boolean }): void {
+    if (this.state.isPaused) {
+      log.warn('System already paused', { reason });
+      this.state.pauseReason = reason;
+      this.state.lastPauseTimestamp = Date.now();
+      this.state.activationMode = 'none';
+      this.state.manualHold = this.state.manualHold || options?.manualOverride === true;
+      this.recordStateChange({ pauseReason: reason, lastPauseTimestamp: this.state.lastPauseTimestamp });
+      return;
+    }
+
+    log.warn('SYSTEM PAUSED', { reason, stage: this.config.stageName });
+
+    this.state.isPaused = true;
+    this.state.pauseReason = reason;
+    this.state.lastPauseTimestamp = Date.now();
+    this.state.unpauseRequiresAuthorization = this.config.requiresExplicitUnpause;
+    this.state.activationMode = 'none';
+    this.state.manualHold = options?.manualOverride === true;
+
+    this.emit('paused', {
+      stage: this.state.currentStage,
+      reason,
+      timestamp: Date.now(),
+    });
+
+    this.recordStateChange({ isPaused: true, pauseReason: reason, lastPauseTimestamp: this.state.lastPauseTimestamp });
+  }
+
+  canProceed(): { allowed: boolean; reason?: string } {
+    if (this.state.killSwitchActive) {
+      return { allowed: false, reason: 'Kill switch is active' };
+    }
+    if (this.state.isPaused) {
+      return {
+        allowed: false,
+        reason: `System paused: ${this.state.pauseReason}`,
+      };
+    }
+
+    return { allowed: true };
+  }
+
+  // ============================================================================
+  // STAGE ADVANCEMENT
+  // ============================================================================
+
+  async requestStageAdvancement(
+    authority: string,
+    targetStage: Stage
+  ): Promise<{ success: boolean; message: string }> {
+    if (!authority || authority.length === 0) {
+      return {
+        success: false,
+        message: 'Invalid authority - Stage advancement requires human authorization',
+      };
+    }
+
+    if (targetStage !== this.state.currentStage + 1) {
+      return {
+        success: false,
+        message: `Cannot skip stages. Current: ${this.state.currentStage}, Target: ${targetStage}`,
+      };
+    }
+
+    if (!this.state.proofMetrics.meetsAdvancementCriteria) {
+      return {
+        success: false,
+        message: 'Hard stage safety facts do not permit advancement',
+      };
+    }
+
+    const previousStage = this.state.currentStage;
+    this.state.currentStage = targetStage;
+    this.config = STAGE_CONFIGS[targetStage];
+    this.state.proofMetrics = this.getEmptyProofMetrics();
+
+    log.info('STAGE ADVANCED WITHOUT EXECUTION HALT', {
+      from: STAGE_CONFIGS[previousStage].stageName,
+      to: this.config.stageName,
+      authority,
+    });
+
+    this.emit('stage-advanced', {
+      previousStage,
+      currentStage: targetStage,
+      authority,
+      timestamp: Date.now(),
+    });
+
+    this.activateAutomatically(`stage_advancement:${previousStage}->${targetStage}`);
+    this.recordStateChange({
+      currentStage: targetStage,
+      isPaused: false,
+      pauseReason: undefined,
+      activationMode: 'automatic',
+      manualHold: false,
+    });
+    await this.persistState();
+
+    return {
+      success: true,
+      message: `Advanced to ${this.config.stageName}. Canonical execution remains active subject to hard facts.`,
+    };
+  }
+
+  async evaluateAutomaticAdvancement(evidence: AutomaticAdvancementEvidence): Promise<AutomaticAdvancementResult> {
+    const normalizedEvidence = normalizeAutomaticAdvancementEvidence(evidence);
+    this.state.automaticAdvancementEvidence = normalizedEvidence;
+
+    const blockers = this.getAutomaticAdvancementBlockers(normalizedEvidence);
+    this.state.automaticAdvancementBlockers = blockers;
+    if (blockers.length > 0) {
+      this.recordStateChange({
+        automaticAdvancementEvidence: normalizedEvidence,
+        automaticAdvancementBlockers: blockers,
+      });
+      await this.persistState();
+      return { advanced: false, fromStage: this.state.currentStage, blockers };
+    }
+
+    const { profitLadder } = await import('./profit-ladder.js');
+    const tierAdvance = profitLadder.advanceToNextTier();
+    if (!tierAdvance.success) {
+      const tierBlocker = `Profit ladder did not advance: ${tierAdvance.message}`;
+      this.state.automaticAdvancementBlockers = [tierBlocker];
+      this.recordStateChange({ automaticAdvancementBlockers: [tierBlocker] });
+      await this.persistState();
+      return { advanced: false, fromStage: this.state.currentStage, blockers: [tierBlocker] };
+    }
+    this.state.profitLadderState = profitLadder.exportState();
+
+    const previousStage = this.state.currentStage;
+    const nextStage = (previousStage + 1) as Stage;
+    this.state.currentStage = nextStage;
+    this.config = STAGE_CONFIGS[nextStage];
+    this.state.proofMetrics = this.getEmptyProofMetrics();
+    this.state.automaticAdvancementBlockers = [];
+
+    log.info('STAGE ADVANCED AUTOMATICALLY FROM VERIFIED EVIDENCE', {
+      from: STAGE_CONFIGS[previousStage].stageName,
+      to: this.config.stageName,
+      cryptaraRiskBudget: normalizedEvidence.cryptara.riskBudget,
+      preferredChains: normalizedEvidence.cryptara.preferredChains,
+      profitLadderTier: normalizedEvidence.profitLadder.currentTierId,
+      softRankingVetoAuthority: false,
+    });
+    this.emit('stage-advanced', {
+      previousStage,
+      currentStage: nextStage,
+      authority: 'system',
+      automatic: true,
+      evidence: normalizedEvidence,
+      timestamp: Date.now(),
+    });
+    this.activateAutomatically(`automatic_stage_advancement:${previousStage}->${nextStage}`, normalizedEvidence);
+    this.recordStateChange({
+      currentStage: nextStage,
+      isPaused: false,
+      activationMode: 'automatic',
+      manualHold: false,
+      automaticAdvancementEvidence: normalizedEvidence,
+      automaticAdvancementBlockers: [],
+    });
+    await this.persistState();
+    return { advanced: true, fromStage: previousStage, toStage: nextStage, blockers: [] };
+  }
+
+  async recordExecutionEvidence(input: {
+    success: boolean;
+    realizedProfitUsd: number | null;
+    automaticEvidence: AutomaticAdvancementEvidence;
+    cryptaraFeedback: PersistedCryptaraExecutionEvidence;
+  }): Promise<AutomaticAdvancementResult> {
+    const metrics = this.state.proofMetrics;
+    const previousTrades = metrics.totalTrades;
+    metrics.totalTrades += 1;
+    if (input.success && input.realizedProfitUsd !== null && Number.isFinite(input.realizedProfitUsd)) {
+      metrics.winningTrades += 1;
+      this.state.dailyProfitUSD += input.realizedProfitUsd;
+      this.state.totalProfitUSD += input.realizedProfitUsd;
+    } else {
+      metrics.losingTrades += 1;
+    }
+    metrics.successRate = metrics.winningTrades / metrics.totalTrades;
+    if (input.realizedProfitUsd !== null && Number.isFinite(input.realizedProfitUsd)) {
+      metrics.avgProfitPerTrade = ((metrics.avgProfitPerTrade * previousTrades) + input.realizedProfitUsd) / metrics.totalTrades;
+    }
+    metrics.meetsAdvancementCriteria = this.checkAdvancementCriteria();
+    this.state.cryptaraExecutionEvidence.push(normalizeCryptaraExecutionEvidence(input.cryptaraFeedback));
+    if (this.state.cryptaraExecutionEvidence.length > 1000) {
+      this.state.cryptaraExecutionEvidence = this.state.cryptaraExecutionEvidence.slice(-1000);
+    }
+    this.emit('execution-evidence-recorded', {
+      stage: this.state.currentStage,
+      metrics: { ...metrics },
+      success: input.success,
+      realizedProfitUsd: input.realizedProfitUsd,
+      timestamp: Date.now(),
+    });
+    return this.evaluateAutomaticAdvancement(input.automaticEvidence);
+  }
+
+  async updateProofMetrics(metrics: Partial<ProofMetrics>): Promise<void> {
+    this.state.proofMetrics = {
+      ...this.state.proofMetrics,
+      ...metrics,
+    };
+
+    this.state.proofMetrics.meetsAdvancementCriteria = this.checkAdvancementCriteria();
+
+    this.emit('metrics-updated', {
+      stage: this.state.currentStage,
+      metrics: this.state.proofMetrics,
+      timestamp: Date.now(),
+    });
+    await this.persistState();
+  }
+
+  private checkAdvancementCriteria(): boolean {
+    const m = this.state.proofMetrics;
+    m.uptime = this.state.activatedAt ? Math.max(0, Date.now() - this.state.activatedAt) : 0;
+
+    if (this.state.currentStage === Stage.STAGE_1_CONSTRAINED_PILOT) {
+      return m.chainHealthy &&
+        m.liveValidationSamples >= 3 &&
+        m.liveValidationPassRate >= 0.8 &&
+        !this.state.blockingAnomaly &&
+        !this.state.killSwitchActive;
+    }
+
+    // Stage 2+ deliberately has no historical-performance requirement. Trade
+    // count, win rate, Sharpe, Monte Carlo pass rate and uptime remain telemetry
+    // only. Automatic advancement additionally requires the canonical Profit
+    // Ladder evidence and clear risk circuit breakers below.
+    return !this.state.blockingAnomaly &&
+      !this.state.killSwitchActive &&
+      this.state.currentDrawdownPercent <= this.config.maxDrawdownPercent;
+  }
+
+  private getAutomaticAdvancementBlockers(evidence: AutomaticAdvancementEvidence): string[] {
+    const blockers: string[] = [];
+    if (this.state.currentStage >= Stage.STAGE_6_CONDITIONAL_AUTONOMY) {
+      blockers.push('Already at the highest stage');
+    }
+    if (this.state.manualHold) blockers.push('A human pause or stop override is active');
+    if (this.state.killSwitchActive) blockers.push('Kill-switch is active');
+    if (this.state.blockingAnomaly) blockers.push('Blocking anomaly is active');
+    if (!this.state.proofMetrics.meetsAdvancementCriteria) blockers.push('Hard StageManager safety facts do not permit advancement');
+    if (!evidence.risk.circuitBreakersClear) blockers.push(`Risk circuit breakers are tripped: ${evidence.risk.trippedCircuitBreakers.join(', ')}`);
+    if (evidence.profitLadder.currentTierId !== this.state.currentStage - 1) {
+      blockers.push('Profit-ladder tier is not aligned with the current governance stage');
+    }
+    if (!evidence.profitLadder.readyForNextTier) {
+      blockers.push(...evidence.profitLadder.blockers.map(blocker => `Profit ladder: ${blocker}`));
+      if (evidence.profitLadder.blockers.length === 0) blockers.push('Profit ladder is not ready for the next tier');
+    }
+    return blockers;
+  }
+
+  // ============================================================================
+  // CYCLE MANAGEMENT
+  // ============================================================================
+
+  beginCycle(): void {
+    this.state.cycleCount++;
+    this.state.lastCycleStartTime = Date.now();
+
+    this.emit('cycle-started', {
+      stage: this.state.currentStage,
+      cycleCount: this.state.cycleCount,
+      timestamp: Date.now(),
+    });
+  }
+
+  endCycle(): void {
+    this.state.lastCycleEndTime = Date.now();
+
+    this.emit('cycle-ended', {
+      stage: this.state.currentStage,
+      cycleCount: this.state.cycleCount,
+      timestamp: Date.now(),
+    });
+
+    log.debug('Cycle completed without global execution pause', {
+      stage: this.state.currentStage,
+      cycleCount: this.state.cycleCount,
+      automaticPauseAfterCycleAuthority: false,
+    });
+  }
+
+  // ============================================================================
+  // ANOMALY DETECTION
+  // ============================================================================
+
+  reportAnomaly(reason: string, severity: 'low' | 'medium' | 'high' | 'critical'): void {
+    this.state.anomalyCount++;
+    this.state.lastAnomalyTime = Date.now();
+    this.state.lastAnomalyReason = reason;
+    if (severity === 'high' || severity === 'critical') {
+      this.state.blockingAnomaly = true;
+    }
+
+    log.warn('ANOMALY DETECTED', {
+      stage: this.config.stageName,
+      reason,
+      severity,
+      count: this.state.anomalyCount,
+    });
+
+    this.emit('anomaly-detected', {
+      stage: this.state.currentStage,
+      reason,
+      severity,
+      count: this.state.anomalyCount,
+      timestamp: Date.now(),
+    });
+
+    if (severity === 'high' || severity === 'critical') {
+      this.pause(`Anomaly detected: ${reason} (${severity})`);
+    }
+  }
+
+  // ============================================================================
+  // STATE QUERIES
+  // ============================================================================
+
+  getCurrentStage(): Stage {
+    return this.state.currentStage;
+  }
+
+  getStageConfig(): StageConfig {
+    return { ...this.config };
+  }
+
+  getState(): StageState {
+    return { ...this.state };
+  }
+
+  isPaused(): boolean {
+    return this.state.isPaused;
+  }
+
+  canExecuteTrades(): boolean {
+    return this.config.canExecuteTrades && !this.state.isPaused && !this.state.killSwitchActive;
+  }
+
+  setInitialGasReadiness(readiness: InitialGasReadiness): void {
+    this.state.initialGasReady = readiness.status === 'INITIAL_GAS_READY' && readiness.initialGasReady;
+    this.state.initialGasReadinessStatus = readiness.status;
+    this.state.initialGasReadinessObservedAt = readiness.observedAt;
+    this.recordStateChange({
+      initialGasReady: this.state.initialGasReady,
+      initialGasReadinessStatus: this.state.initialGasReadinessStatus,
+      initialGasReadinessObservedAt: this.state.initialGasReadinessObservedAt,
+    });
+    this.persistSoon();
+    this.emit('initial-gas-readiness-updated', {
+      ready: this.state.initialGasReady,
+      status: this.state.initialGasReadinessStatus,
+      observedAt: readiness.observedAt,
+    });
+  }
+
+  isInitialGasReady(): boolean {
+    return this.state.initialGasReady && this.state.initialGasReadinessStatus === 'INITIAL_GAS_READY';
+  }
+
+  resetInitialGasReadiness(): void {
+    this.state.initialGasReady = false;
+    this.state.initialGasReadinessStatus = 'PRE_STAGE_1_BOOTSTRAP';
+    this.state.initialGasReadinessObservedAt = undefined;
+    this.recordStateChange({
+      initialGasReady: false,
+      initialGasReadinessStatus: this.state.initialGasReadinessStatus,
+      initialGasReadinessObservedAt: undefined,
+    });
+    this.persistSoon();
+  }
+
+  isMarketOperationsAllowed(): boolean {
+    return this.isInitialGasReady() && !this.state.isPaused && !this.state.killSwitchActive;
+  }
+
+  requiresHumanApproval(): boolean {
+    return this.config.requiresHumanApproval && this.state.activationMode !== 'automatic';
+  }
+
+  isAutomaticallyActivated(): boolean {
+    return this.state.activationMode === 'automatic' && !this.state.isPaused;
+  }
+
+  getMaxDailyProfit(): number {
+    return this.config.maxDailyProfit;
+  }
+
+  getCurrentDailyProfit(): number {
+    return this.state.dailyProfitUSD;
+  }
+
+  getTotalProfit(): number {
+    return this.state.totalProfitUSD;
+  }
+
+  async recordLiveValidation(evidence: { passed: boolean; chainHealthy: boolean; timestamp?: number }): Promise<void> {
+    const metrics = this.state.proofMetrics;
+    metrics.liveValidationSamples += 1;
+    if (evidence.passed) metrics.liveValidationPasses += 1;
+    metrics.liveValidationPassRate = metrics.liveValidationPasses / metrics.liveValidationSamples;
+    metrics.chainHealthy = evidence.chainHealthy;
+    metrics.lastLiveValidationAt = evidence.timestamp ?? Date.now();
+    metrics.meetsAdvancementCriteria = this.checkAdvancementCriteria();
+    this.emit('live-validation-recorded', {
+      stage: this.state.currentStage,
+      metrics: { ...metrics },
+      timestamp: metrics.lastLiveValidationAt,
+    });
+    await this.persistState();
+  }
+
+  engageKillSwitch(reason: string): void {
+    this.state.killSwitchActive = true;
+    this.state.isPaused = true;
+    this.state.pauseReason = `Kill-switch: ${reason}`;
+    this.state.lastPauseTimestamp = Date.now();
+    this.state.unpauseRequiresAuthorization = true;
+    this.state.activationMode = 'none';
+    this.state.manualHold = false;
+    this.emit('kill-switch-engaged', { stage: this.state.currentStage, reason, timestamp: Date.now() });
+    this.recordStateChange({
+      killSwitchActive: true,
+      isPaused: true,
+      pauseReason: this.state.pauseReason,
+      lastPauseTimestamp: this.state.lastPauseTimestamp,
+    });
+  }
+
+  resetKillSwitch(confirmation: string): { success: boolean; message: string } {
+    if (confirmation !== 'CONFIRM_KILL_SWITCH_RESET') {
+      return { success: false, message: 'Invalid confirmation code' };
+    }
+    this.state.killSwitchActive = false;
+    this.state.isPaused = true;
+    this.state.pauseReason = 'Kill switch reset - awaiting fresh qualifying evidence or manual activation';
+    this.state.lastPauseTimestamp = Date.now();
+    this.state.activationMode = 'none';
+    this.state.manualHold = false;
+    this.recordStateChange({ killSwitchActive: false, isPaused: true, pauseReason: this.state.pauseReason, lastPauseTimestamp: this.state.lastPauseTimestamp });
+    return { success: true, message: 'Kill switch reset. System remains paused until requalification or manual activation.' };
+  }
+
+  reportUncertainty(uncertainty: string): void {
+    if (!this.state.uncertainties.includes(uncertainty)) this.state.uncertainties.push(uncertainty);
+    this.recordStateChange({ uncertainties: [...this.state.uncertainties] });
+    this.emit('uncertainty-reported', {
+      uncertainty,
+      timestamp: Date.now(),
+      executionAuthority: false,
+      globalPauseApplied: false,
+    });
+  }
+
+  resolveUncertainty(uncertainty: string): boolean {
+    const index = this.state.uncertainties.indexOf(uncertainty);
+    if (index === -1) return false;
+    this.state.uncertainties.splice(index, 1);
+    this.recordStateChange({ uncertainties: [...this.state.uncertainties] });
+    this.emit('uncertainty-resolved', { uncertainty, timestamp: Date.now() });
+    return true;
+  }
+
+  // ============================================================================
+  // PROFIT TRACKING
+  // ============================================================================
+
+  /**
+   * Legacy compatibility telemetry only. Canonical terminal execution evidence
+   * is recorded by recordExecutionEvidence(); profit magnitude never pauses.
+   */
+  recordTrade(profitUSD: number): void {
+    this.state.dailyProfitUSD += profitUSD;
+    this.state.totalProfitUSD += profitUSD;
+
+    this.emit('trade-recorded', {
+      profitUSD,
+      dailyTotal: this.state.dailyProfitUSD,
+      totalProfit: this.state.totalProfitUSD,
+      profitCeilingExecutionAuthority: false,
+      timestamp: Date.now(),
+    });
+  }
+
+  resetDailyProfit(): void {
+    const previousDailyProfit = this.state.dailyProfitUSD;
+    this.state.dailyProfitUSD = 0;
+
+    log.info('Daily profit counter reset', {
+      previousDailyProfit,
+      totalProfit: this.state.totalProfitUSD,
+    });
+
+    this.emit('daily-profit-reset', {
+      previousDailyProfit,
+      totalProfit: this.state.totalProfitUSD,
+      timestamp: Date.now(),
+    });
+  }
+
+  // ============================================================================
+  // UTILITIES
+  // ============================================================================
+
+  private createInitialState(): StageState {
+    return {
+      currentStage: Stage.STAGE_1_CONSTRAINED_PILOT,
+      isPaused: false,
+      unpauseRequiresAuthorization: false,
+      activationMode: 'automatic',
+      activatedAt: Date.now(),
+      manualHold: false,
+      cycleCount: 0,
+      dailyProfitUSD: 0,
+      totalProfitUSD: 0,
+      currentDrawdownPercent: 0,
+      proofMetrics: this.getEmptyProofMetrics(),
+      anomalyCount: 0,
+      blockingAnomaly: false,
+      killSwitchActive: false,
+      uncertainties: [],
+      initialGasReady: false,
+      initialGasReadinessStatus: 'PRE_STAGE_1_BOOTSTRAP',
+      automaticAdvancementEvidence: null,
+      automaticAdvancementBlockers: [],
+      cryptaraExecutionEvidence: [],
+      profitLadderState: null,
+    };
+  }
+
+  private async persistState(): Promise<void> {
+    if (!this.stateStore) return;
+    const snapshot = this.exportState();
+    const write = this.persistenceTail
+      .catch(() => undefined)
+      .then(() => this.stateStore!.save(snapshot));
+    this.persistenceTail = write;
+    await write;
+  }
+
+  private persistSoon(): void {
+    void this.persistState().catch(error => {
+      log.error('Failed to persist governance state', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+
+  private getEmptyProofMetrics(): ProofMetrics {
+    return {
+      successRate: 0,
+      totalTrades: 0,
+      winningTrades: 0,
+      losingTrades: 0,
+      avgProfitPerTrade: 0,
+      sharpeRatio: 0,
+      maxDrawdown: 0,
+      uptime: 0,
+      monteCarloPassRate: 0,
+      monteCarloSimulations: 0,
+      liveValidationSamples: 0,
+      liveValidationPasses: 0,
+      liveValidationPassRate: 0,
+      chainHealthy: false,
+      meetsAdvancementCriteria: false,
+    };
+  }
+
+  private recordStateChange(changes: Partial<StageState>): void {
+    this.stateHistory.push({
+      timestamp: Date.now(),
+      state: changes,
+    });
+
+    if (this.stateHistory.length > 1000) {
+      this.stateHistory.shift();
+    }
+    this.persistSoon();
+  }
+
+  getStateHistory(): Array<{ timestamp: number; state: Partial<StageState> }> {
+    return [...this.stateHistory];
+  }
+
+  getCryptaraExecutionEvidence(): PersistedCryptaraExecutionEvidence[] {
+    return this.state.cryptaraExecutionEvidence.map(entry => ({ ...entry }));
+  }
+
+  getProfitLadderState(): Record<string, unknown> | null {
+    return this.state.profitLadderState ? { ...this.state.profitLadderState } : null;
+  }
+
+  async recordProfitLadderState(value: Record<string, unknown>): Promise<void> {
+    this.state.profitLadderState = { ...value };
+    this.recordStateChange({ profitLadderState: this.state.profitLadderState });
+    await this.persistState();
+  }
+
+  exportState(): StageManagerPersistedSnapshot {
+    return {
+      state: this.state,
+      stateHistory: this.stateHistory,
+    };
+  }
+
+  importState(data: StageManagerPersistedSnapshot): void {
+    if (!isRecord(data.state)) {
+      throw new Error('Persisted governance state is missing a state object');
+    }
+
+    const restored = this.normalizeRestoredState(data.state);
+    const legacyAuthorizationPause =
+      restored.currentStage === Stage.STAGE_1_CONSTRAINED_PILOT &&
+      (restored.pauseReason === 'Initial state - awaiting human authorization' ||
+        restored.pauseReason === 'restart_requires_human_unpause' ||
+        restored.pauseReason === 'Stage advancement - awaiting UNPAUSE');
+    if (legacyAuthorizationPause) {
+      restored.isPaused = false;
+      restored.pauseReason = undefined;
+      restored.lastPauseTimestamp = undefined;
+      restored.unpauseRequiresAuthorization = false;
+      restored.activationMode = 'automatic';
+      restored.manualHold = false;
+    }
+    const mayResumeAutomatic =
+      restored.activationMode === 'automatic' &&
+      !restored.isPaused &&
+      !restored.manualHold &&
+      !restored.killSwitchActive &&
+      !restored.blockingAnomaly;
+    if (!legacyAuthorizationPause && !mayResumeAutomatic && !restored.isPaused) {
+      restored.isPaused = true;
+      restored.pauseReason = 'restart_requires_human_unpause';
+      restored.lastPauseTimestamp = Date.now();
+      restored.unpauseRequiresAuthorization = true;
+      restored.activationMode = 'none';
+      restored.manualHold = true;
+    } else if (mayResumeAutomatic) {
+      restored.unpauseRequiresAuthorization = false;
+    }
+
+    restored.initialGasReady = false;
+    restored.initialGasReadinessStatus = 'PRE_STAGE_1_BOOTSTRAP';
+    restored.initialGasReadinessObservedAt = undefined;
+    this.state = restored;
+    this.config = STAGE_CONFIGS[restored.currentStage];
+    this.state.proofMetrics.meetsAdvancementCriteria = this.checkAdvancementCriteria();
+    this.stateHistory = Array.isArray(data.stateHistory)
+      ? data.stateHistory.slice(-1000).filter(isStateHistoryEntry)
+      : [];
+
+    log.info('State imported', {
+      stage: this.config.stageName,
+      isPaused: this.state.isPaused,
+      advisoryUncertaintyExecutionAuthority: false,
+      monteCarloExecutionAuthority: false,
+      historicalPerformanceAdvancementAuthority: false,
+    });
+  }
+
+  private normalizeRestoredState(value: Record<string, unknown>): StageState {
+    const stage = Number(value.currentStage);
+    if (!Number.isInteger(stage) || !STAGE_CONFIGS[stage as Stage]) {
+      throw new Error('Persisted governance state has an invalid stage');
+    }
+    if (!isRecord(value.proofMetrics)) {
+      throw new Error('Persisted governance state is missing proof metrics');
+    }
+
+    const proofMetrics = this.normalizeProofMetrics(value.proofMetrics);
+    const initial = this.createInitialState();
+    return {
+      ...initial,
+      currentStage: stage as Stage,
+      isPaused: requireBoolean('isPaused', value.isPaused),
+      pauseReason: optionalString(value.pauseReason),
+      lastPauseTimestamp: optionalTimestamp(value.lastPauseTimestamp),
+      unpauseRequiresAuthorization: requireBoolean('unpauseRequiresAuthorization', value.unpauseRequiresAuthorization),
+      activationMode: value.activationMode === 'automatic' || value.activationMode === 'manual' || value.activationMode === 'none'
+        ? value.activationMode
+        : requireBoolean('isPaused', value.isPaused) ? 'none' : 'manual',
+      activatedAt: optionalTimestamp(value.activatedAt),
+      manualHold: value.manualHold === undefined || value.manualHold === null
+        ? false
+        : requireBoolean('manualHold', value.manualHold),
+      lastUnpauseTimestamp: optionalTimestamp(value.lastUnpauseTimestamp),
+      lastUnpauseAuthority: optionalString(value.lastUnpauseAuthority),
+      lastUnpauseScope: optionalString(value.lastUnpauseScope),
+      lastUnpauseDuration: optionalNonNegativeNumber(value.lastUnpauseDuration),
+      cycleCount: requireNonNegativeInteger('cycleCount', value.cycleCount),
+      dailyProfitUSD: requireFiniteNumber('dailyProfitUSD', value.dailyProfitUSD),
+      totalProfitUSD: requireFiniteNumber('totalProfitUSD', value.totalProfitUSD),
+      currentDrawdownPercent: requireFiniteNumber('currentDrawdownPercent', value.currentDrawdownPercent),
+      proofMetrics,
+      anomalyCount: requireNonNegativeInteger('anomalyCount', value.anomalyCount),
+      lastAnomalyTime: optionalTimestamp(value.lastAnomalyTime),
+      lastAnomalyReason: optionalString(value.lastAnomalyReason),
+      blockingAnomaly: requireBoolean('blockingAnomaly', value.blockingAnomaly),
+      killSwitchActive: requireBoolean('killSwitchActive', value.killSwitchActive),
+      uncertainties: requireStringArray('uncertainties', value.uncertainties),
+      initialGasReady: value.initialGasReady === undefined || value.initialGasReady === null
+        ? false
+        : requireBoolean('initialGasReady', value.initialGasReady),
+      initialGasReadinessStatus: normalizeInitialGasReadinessStatus(value.initialGasReadinessStatus),
+      initialGasReadinessObservedAt: optionalTimestamp(value.initialGasReadinessObservedAt),
+      automaticAdvancementEvidence: value.automaticAdvancementEvidence === undefined || value.automaticAdvancementEvidence === null
+        ? null
+        : normalizeAutomaticAdvancementEvidence(value.automaticAdvancementEvidence),
+      automaticAdvancementBlockers: value.automaticAdvancementBlockers === undefined || value.automaticAdvancementBlockers === null
+        ? []
+        : requireStringArray('automaticAdvancementBlockers', value.automaticAdvancementBlockers),
+      cryptaraExecutionEvidence: value.cryptaraExecutionEvidence === undefined || value.cryptaraExecutionEvidence === null
+        ? []
+        : requireCryptaraExecutionEvidence(value.cryptaraExecutionEvidence),
+      profitLadderState: value.profitLadderState === undefined || value.profitLadderState === null
+        ? null
+        : requireRecord('profitLadderState', value.profitLadderState),
+    };
+  }
+
+  private normalizeProofMetrics(value: Record<string, unknown>): ProofMetrics {
+    const liveValidationSamples = requireNonNegativeInteger('liveValidationSamples', value.liveValidationSamples);
+    const liveValidationPasses = requireNonNegativeInteger('liveValidationPasses', value.liveValidationPasses);
+    if (liveValidationPasses > liveValidationSamples) {
+      throw new Error('Persisted governance evidence has more passes than samples');
+    }
+    return {
+      successRate: requireFiniteNumber('successRate', value.successRate),
+      totalTrades: requireNonNegativeInteger('totalTrades', value.totalTrades),
+      winningTrades: requireNonNegativeInteger('winningTrades', value.winningTrades),
+      losingTrades: requireNonNegativeInteger('losingTrades', value.losingTrades),
+      avgProfitPerTrade: requireFiniteNumber('avgProfitPerTrade', value.avgProfitPerTrade),
+      sharpeRatio: requireFiniteNumber('sharpeRatio', value.sharpeRatio),
+      maxDrawdown: requireFiniteNumber('maxDrawdown', value.maxDrawdown),
+      uptime: requireNonNegativeNumber('uptime', value.uptime),
+      monteCarloPassRate: requireUnitInterval('monteCarloPassRate', value.monteCarloPassRate),
+      monteCarloSimulations: requireNonNegativeInteger('monteCarloSimulations', value.monteCarloSimulations),
+      liveValidationSamples,
+      liveValidationPasses,
+      liveValidationPassRate: requireUnitInterval('liveValidationPassRate', value.liveValidationPassRate),
+      chainHealthy: requireBoolean('chainHealthy', value.chainHealthy),
+      lastLiveValidationAt: optionalTimestamp(value.lastLiveValidationAt),
+      meetsAdvancementCriteria: false,
+    };
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeInitialGasReadinessStatus(value: unknown): InitialGasReadinessStatus {
+  if (value === undefined || value === null) return 'PRE_STAGE_1_BOOTSTRAP';
+  const statuses: InitialGasReadinessStatus[] = [
+    'PRE_STAGE_1_BOOTSTRAP',
+    'INITIAL_GAS_READY',
+    'GAS_READY',
+    'GAS_BELOW_THRESHOLD',
+    'GAS_ZERO_BALANCE',
+    'BALANCE_UNKNOWN',
+    'PRICE_UNKNOWN',
+    'PROVIDER_UNAVAILABLE',
+  ];
+  if (typeof value !== 'string' || !statuses.includes(value as InitialGasReadinessStatus)) {
+    throw new Error('Persisted governance state has an invalid initial gas readiness status');
+  }
+  return value as InitialGasReadinessStatus;
+}
+
+function normalizeAutomaticAdvancementEvidence(value: unknown): AutomaticAdvancementEvidence {
+  if (!isRecord(value) || !isRecord(value.marketGate) || !isRecord(value.cryptara) || !isRecord(value.profitLadder) || !isRecord(value.risk)) {
+    throw new Error('Persisted automatic advancement evidence has an invalid shape');
+  }
+  const gateDecision = value.marketGate.decision;
+  if (gateDecision !== 'ALLOW' && gateDecision !== 'BLOCK') {
+    throw new Error('Persisted automatic advancement evidence has an invalid market gate decision');
+  }
+  const riskBudget = value.cryptara.riskBudget;
+  if (riskBudget !== 'defensive' && riskBudget !== 'balanced' && riskBudget !== 'aggressive') {
+    throw new Error('Persisted automatic advancement evidence has an invalid Cryptara risk budget');
+  }
+  if (!Array.isArray(value.cryptara.chainPerformance)) {
+    throw new Error('Persisted automatic advancement evidence has invalid chain performance');
+  }
+  const chainPerformance = value.cryptara.chainPerformance.map(entry => {
+    if (!isRecord(entry)) throw new Error('Persisted automatic advancement evidence has an invalid chain performance entry');
+    return {
+      chain: requireNonEmptyString('chain', entry.chain),
+      netRealizedProfitUsd: requireFiniteNumber('netRealizedProfitUsd', entry.netRealizedProfitUsd),
+      successfulExecutions: requireNonNegativeInteger('successfulExecutions', entry.successfulExecutions),
+      totalExecutions: requireNonNegativeInteger('totalExecutions', entry.totalExecutions),
+      rankingScore: requireFiniteNumber('rankingScore', entry.rankingScore),
+    };
+  });
+  const preferredExecutionModes = requireStringArray('preferredExecutionModes', value.cryptara.preferredExecutionModes);
+  if (preferredExecutionModes.some(mode => mode !== 'standard' && mode !== 'zero_capital' && mode !== 'flashbots')) {
+    throw new Error('Persisted automatic advancement evidence has an invalid Cryptara execution mode');
+  }
+
+  return {
+    evaluatedAt: requireNonNegativeNumber('evaluatedAt', value.evaluatedAt),
+    marketGate: {
+      decision: gateDecision,
+      evaluatedAt: requireNonNegativeNumber('marketGate.evaluatedAt', value.marketGate.evaluatedAt),
+      reasons: requireStringArray('marketGate.reasons', value.marketGate.reasons),
+    },
+    cryptara: {
+      evaluatedAt: requireNonNegativeNumber('cryptara.evaluatedAt', value.cryptara.evaluatedAt),
+      sampleCount: requireNonNegativeInteger('cryptara.sampleCount', value.cryptara.sampleCount),
+      successfulExecutions: requireNonNegativeInteger('cryptara.successfulExecutions', value.cryptara.successfulExecutions),
+      successRate: requireUnitInterval('cryptara.successRate', value.cryptara.successRate),
+      averageNetProfitUsd: requireFiniteNumber('cryptara.averageNetProfitUsd', value.cryptara.averageNetProfitUsd),
+      averageSlippageBps: value.cryptara.averageSlippageBps === null
+        ? null
+        : requireNonNegativeNumber('cryptara.averageSlippageBps', value.cryptara.averageSlippageBps),
+      preferredChains: requireStringArray('cryptara.preferredChains', value.cryptara.preferredChains),
+      preferredExecutionModes: preferredExecutionModes as Array<'standard' | 'zero_capital' | 'flashbots'>,
+      riskBudget,
+      notionalMultiplier: requireNonNegativeNumber('cryptara.notionalMultiplier', value.cryptara.notionalMultiplier),
+      maxSlippageBps: requireNonNegativeNumber('cryptara.maxSlippageBps', value.cryptara.maxSlippageBps),
+      chainPerformance,
+    },
+    profitLadder: {
+      currentTierId: requireNonNegativeInteger('profitLadder.currentTierId', value.profitLadder.currentTierId),
+      readyForNextTier: requireBoolean('profitLadder.readyForNextTier', value.profitLadder.readyForNextTier),
+      blockers: requireStringArray('profitLadder.blockers', value.profitLadder.blockers),
+    },
+    risk: {
+      circuitBreakersClear: requireBoolean('risk.circuitBreakersClear', value.risk.circuitBreakersClear),
+      trippedCircuitBreakers: requireStringArray('risk.trippedCircuitBreakers', value.risk.trippedCircuitBreakers),
+    },
+  };
+}
+
+function requireCryptaraExecutionEvidence(value: unknown): PersistedCryptaraExecutionEvidence[] {
+  if (!Array.isArray(value)) throw new Error('Persisted Cryptara execution evidence must be an array');
+  return value.slice(-1000).map(normalizeCryptaraExecutionEvidence);
+}
+
+function normalizeCryptaraExecutionEvidence(value: PersistedCryptaraExecutionEvidence | unknown): PersistedCryptaraExecutionEvidence {
+  if (!isRecord(value)) throw new Error('Persisted Cryptara execution evidence has an invalid shape');
+  const source = value.source;
+  if (source !== 'master_pipeline' && source !== 'zero_capital' && source !== 'flash_loan' && source !== 'manual') {
+    throw new Error('Persisted Cryptara execution evidence has an invalid source');
+  }
+  return {
+    source,
+    opportunityId: optionalString(value.opportunityId),
+    chain: requireNonEmptyString('chain', value.chain),
+    symbol: requireNonEmptyString('symbol', value.symbol),
+    strategy: requireNonEmptyString('strategy', value.strategy),
+    success: requireBoolean('success', value.success),
+    expectedProfitUsd: requireFiniteNumber('expectedProfitUsd', value.expectedProfitUsd),
+    realizedProfitUsd: nullableFiniteNumber('realizedProfitUsd', value.realizedProfitUsd),
+    feeUsd: nullableFiniteNumber('feeUsd', value.feeUsd),
+    slippageBps: nullableFiniteNumber('slippageBps', value.slippageBps),
+    latencyMs: requireNonNegativeNumber('latencyMs', value.latencyMs),
+    usedZeroCapital: requireBoolean('usedZeroCapital', value.usedZeroCapital),
+    timestamp: requireNonNegativeNumber('timestamp', value.timestamp),
+    notes: optionalString(value.notes),
+    settlementStatus: optionalString(value.settlementStatus),
+    settlementConfirmed: optionalBoolean(value.settlementConfirmed),
+    provenance: optionalStringArray(value.provenance),
+    settlement: value.settlement === undefined ? undefined : normalizePersistedSettlement(value.settlement),
+  };
+}
+
+function normalizePersistedSettlement(value: unknown): NormalizedRealizedExecution {
+  if (!isRecord(value)) throw new Error('Persisted settlement has an invalid shape');
+  const status = value.status;
+  if (!isExecutionStatus(status)) throw new Error('Persisted settlement has an invalid status');
+  const predicted = requireRecord('settlement.predicted', value.predicted);
+  const realized = requireRecord('settlement.realized', value.realized);
+  const provenance = requireStringArray('settlement.provenance', value.provenance).slice(0, 50);
+  const orders = value.orders === undefined
+    ? undefined
+    : requireRecordArray('settlement.orders', value.orders).slice(0, 2).map((order, orderIndex) => normalizePersistedOrder(order, orderIndex));
+  const tokenAmounts = value.tokenAmounts === undefined
+    ? undefined
+    : requireRecordArray('settlement.tokenAmounts', value.tokenAmounts).slice(0, 100).map((tokenAmount, tokenIndex) => ({
+      token: requireNonEmptyString(`settlement.tokenAmounts[${tokenIndex}].token`, tokenAmount.token),
+      direction: requireSettlementDirection(`settlement.tokenAmounts[${tokenIndex}].direction`, tokenAmount.direction),
+      amount: requireNonEmptyString(`settlement.tokenAmounts[${tokenIndex}].amount`, tokenAmount.amount),
+      decimals: tokenAmount.decimals === undefined ? undefined : requireNonNegativeInteger(`settlement.tokenAmounts[${tokenIndex}].decimals`, tokenAmount.decimals),
+    }));
+  return {
+    status,
+    terminal: requireBoolean('settlement.terminal', value.terminal),
+    settlementConfirmed: requireBoolean('settlement.settlementConfirmed', value.settlementConfirmed),
+    submittedAt: requireNonNegativeNumber('settlement.submittedAt', value.submittedAt),
+    settledAt: nullableNonNegativeNumber('settlement.settledAt', value.settledAt),
+    venueOrRoute: requireNonEmptyString('settlement.venueOrRoute', value.venueOrRoute),
+    chain: value.chain === null ? null : requireNonEmptyString('settlement.chain', value.chain),
+    predicted: {
+      profitUsd: nullableFiniteNumber('settlement.predicted.profitUsd', predicted.profitUsd),
+      feeUsd: nullableFiniteNumber('settlement.predicted.feeUsd', predicted.feeUsd),
+      slippageBps: nullableFiniteNumber('settlement.predicted.slippageBps', predicted.slippageBps),
+    },
+    realized: {
+      acquisitionCostUsd: nullableFiniteNumber('settlement.realized.acquisitionCostUsd', realized.acquisitionCostUsd),
+      proceedsUsd: nullableFiniteNumber('settlement.realized.proceedsUsd', realized.proceedsUsd),
+      exchangeFeeUsd: nullableFiniteNumber('settlement.realized.exchangeFeeUsd', realized.exchangeFeeUsd),
+      gasUsd: nullableFiniteNumber('settlement.realized.gasUsd', realized.gasUsd),
+      gasUsed: nullableString('settlement.realized.gasUsed', realized.gasUsed),
+      effectiveGasPriceWei: nullableString('settlement.realized.effectiveGasPriceWei', realized.effectiveGasPriceWei),
+      slippageBps: nullableFiniteNumber('settlement.realized.slippageBps', realized.slippageBps),
+      netProfitUsd: nullableFiniteNumber('settlement.realized.netProfitUsd', realized.netProfitUsd),
+    },
+    provenance,
+    orders,
+    transactionHash: optionalString(value.transactionHash),
+    blockNumber: value.blockNumber === undefined ? undefined : requireNonNegativeInteger('settlement.blockNumber', value.blockNumber),
+    receiptStatus: value.receiptStatus === undefined ? undefined : requireReceiptStatus(value.receiptStatus),
+    tokenAmounts,
+    error: boundedOptionalString(value.error, 500),
+  };
+}
+
+function normalizePersistedOrder(value: Record<string, unknown>, orderIndex: number): NormalizedRealizedExecution['orders'][number] {
+  const fills = requireRecordArray(`settlement.orders[${orderIndex}].fills`, value.fills).slice(0, 100).map((fill, fillIndex) => ({
+    quantity: requireFiniteNumber(`settlement.orders[${orderIndex}].fills[${fillIndex}].quantity`, fill.quantity),
+    price: requireFiniteNumber(`settlement.orders[${orderIndex}].fills[${fillIndex}].price`, fill.price),
+    feeAmount: nullableFiniteNumber(`settlement.orders[${orderIndex}].fills[${fillIndex}].feeAmount`, fill.feeAmount),
+    feeAsset: nullableString(`settlement.orders[${orderIndex}].fills[${fillIndex}].feeAsset`, fill.feeAsset),
+    timestamp: nullableNonNegativeNumber(`settlement.orders[${orderIndex}].fills[${fillIndex}].timestamp`, fill.timestamp),
+    tradeId: optionalString(fill.tradeId),
+  }));
+  return {
+    venue: requireNonEmptyString(`settlement.orders[${orderIndex}].venue`, value.venue),
+    orderId: requireNonEmptyString(`settlement.orders[${orderIndex}].orderId`, value.orderId),
+    symbol: requireNonEmptyString(`settlement.orders[${orderIndex}].symbol`, value.symbol),
+    side: requireSettlementSide(`settlement.orders[${orderIndex}].side`, value.side),
+    status: isExecutionStatus(value.status) ? value.status : (() => { throw new Error(`Persisted settlement.orders[${orderIndex}] has an invalid status`); })(),
+    terminal: requireBoolean(`settlement.orders[${orderIndex}].terminal`, value.terminal),
+    requestedQuantity: requireFiniteNumber(`settlement.orders[${orderIndex}].requestedQuantity`, value.requestedQuantity),
+    filledQuantity: nullableFiniteNumber(`settlement.orders[${orderIndex}].filledQuantity`, value.filledQuantity),
+    remainingQuantity: nullableFiniteNumber(`settlement.orders[${orderIndex}].remainingQuantity`, value.remainingQuantity),
+    averageFillPrice: nullableFiniteNumber(`settlement.orders[${orderIndex}].averageFillPrice`, value.averageFillPrice),
+    fills,
+    feeAmount: nullableFiniteNumber(`settlement.orders[${orderIndex}].feeAmount`, value.feeAmount),
+    feeAsset: nullableString(`settlement.orders[${orderIndex}].feeAsset`, value.feeAsset),
+    submittedAt: requireNonNegativeNumber(`settlement.orders[${orderIndex}].submittedAt`, value.submittedAt),
+    terminalAt: nullableNonNegativeNumber(`settlement.orders[${orderIndex}].terminalAt`, value.terminalAt),
+    finalBalances: value.finalBalances === undefined ? undefined : requireStringRecord(`settlement.orders[${orderIndex}].finalBalances`, value.finalBalances),
+    error: boundedOptionalString(value.error, 500),
+  };
+}
+
+function isExecutionStatus(value: unknown): value is ExecutionStatus {
+  return value === 'submitted' || value === 'partially_filled' || value === 'filled' || value === 'cancelled' || value === 'rejected' || value === 'failed' || value === 'settlement_unknown';
+}
+
+function requireSettlementSide(name: string, value: unknown): 'buy' | 'sell' {
+  if (value !== 'buy' && value !== 'sell') throw new Error(`Persisted settlement has invalid ${name}`);
+  return value;
+}
+
+function requireSettlementDirection(name: string, value: unknown): 'in' | 'out' {
+  if (value !== 'in' && value !== 'out') throw new Error(`Persisted settlement has invalid ${name}`);
+  return value;
+}
+
+function requireReceiptStatus(value: unknown): 0 | 1 {
+  if (value !== 0 && value !== 1) throw new Error('Persisted settlement has an invalid receiptStatus');
+  return value;
+}
+
+function requireRecordArray(name: string, value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value) || !value.every(isRecord)) throw new Error(`Persisted governance state has invalid ${name}`);
+  return value;
+}
+
+function requireStringRecord(name: string, value: unknown): Record<string, string> {
+  const record = requireRecord(name, value);
+  if (!Object.values(record).every(entry => typeof entry === 'string')) throw new Error(`Persisted governance state has invalid ${name}`);
+  return Object.fromEntries(Object.entries(record).slice(0, 100)) as Record<string, string>;
+}
+
+function nullableFiniteNumber(name: string, value: unknown): number | null {
+  if (value === null) return null;
+  return requireFiniteNumber(name, value);
+}
+
+function nullableNonNegativeNumber(name: string, value: unknown): number | null {
+  if (value === null) return null;
+  return requireNonNegativeNumber(name, value);
+}
+
+function nullableString(name: string, value: unknown): string | null {
+  if (value === null) return null;
+  return requireNonEmptyString(name, value);
+}
+
+function boundedOptionalString(value: unknown, maxLength: number): string | undefined {
+  const string = optionalString(value);
+  return string === undefined ? undefined : string.slice(0, maxLength);
+}
+
+function requireFiniteNumber(name: string, value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`Persisted governance state has invalid ${name}`);
+  return value;
+}
+
+function requireNonNegativeNumber(name: string, value: unknown): number {
+  const number = requireFiniteNumber(name, value);
+  if (number < 0) throw new Error(`Persisted governance state has negative ${name}`);
+  return number;
+}
+
+function requireNonNegativeInteger(name: string, value: unknown): number {
+  const number = requireNonNegativeNumber(name, value);
+  if (!Number.isInteger(number)) throw new Error(`Persisted governance state has non-integer ${name}`);
+  return number;
+}
+
+function requireUnitInterval(name: string, value: unknown): number {
+  const number = requireFiniteNumber(name, value);
+  if (number < 0 || number > 1) throw new Error(`Persisted governance state has out-of-range ${name}`);
+  return number;
+}
+
+function requireBoolean(name: string, value: unknown): boolean {
+  if (typeof value !== 'boolean') throw new Error(`Persisted governance state has invalid ${name}`);
+  return value;
+}
+
+function requireNonEmptyString(name: string, value: unknown): string {
+  if (typeof value !== 'string' || value.trim().length === 0) throw new Error(`Persisted governance state has invalid ${name}`);
+  return value;
+}
+
+function requireRecord(name: string, value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) throw new Error(`Persisted governance state has invalid ${name}`);
+  return { ...value };
+}
+
+function optionalString(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') throw new Error('Persisted governance state has an invalid string field');
+  return value;
+}
+
+function optionalBoolean(value: unknown): boolean | undefined {
+  if (value === undefined || value === null) return undefined;
+  return requireBoolean('boolean', value);
+}
+
+function optionalTimestamp(value: unknown): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  return requireNonNegativeNumber('timestamp', value);
+}
+
+function optionalNonNegativeNumber(value: unknown): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  return requireNonNegativeNumber('number', value);
+}
+
+function requireStringArray(name: string, value: unknown): string[] {
+  if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) {
+    throw new Error(`Persisted governance state has invalid ${name}`);
+  }
+  return [...value];
+}
+
+function optionalStringArray(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  return requireStringArray('string array', value);
+}
+
+function isStateHistoryEntry(value: unknown): value is { timestamp: number; state: Partial<StageState> } {
+  return isRecord(value) &&
+    typeof value.timestamp === 'number' &&
+    Number.isFinite(value.timestamp) &&
+    isRecord(value.state);
+}
+
+export const stageManager = StageManager.getInstance();

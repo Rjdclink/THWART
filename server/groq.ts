@@ -1,0 +1,479 @@
+import { noteLegalProviderHeaders } from './legalProviderAdmission';
+import { AIProvider } from './aiTokenGovernor';
+/**
+ * Groq AI Service - Ultra-fast, free AI inference
+ * Uses native HTTP calls - NO OpenAI SDK dependency
+ * 
+ * Groq provides an OpenAI-compatible API, but we implement direct HTTPS calls
+ * to completely eliminate any dependency on the OpenAI package
+ */
+
+const DEFAULT_GROQ_MODEL =
+  process.env.GROQ_CHAT_MODEL?.trim()
+  || process.env.GROQ_MODEL?.trim()
+  || 'openai/gpt-oss-120b';
+
+interface GroqChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+interface GroqChatCompletionRequest {
+  model: string;
+  messages: GroqChatMessage[];
+  temperature?: number;
+  max_tokens?: number;
+  signal?: AbortSignal;
+  providerPolicy?: string;
+}
+
+let groqModelCatalogCache: { models: Set<string>; expiresAt: number } | null = null;
+const groqBlockedModels = new Map<string, number>();
+const GROQ_MODEL_CATALOG_TTL_MS = 10 * 60_000;
+const GROQ_MODEL_BLOCK_TTL_MS = 10 * 60_000;
+
+function isGroqModelBlocked(model: string): boolean {
+  const until = groqBlockedModels.get(model) || 0;
+  if (until <= Date.now()) {
+    groqBlockedModels.delete(model);
+    return false;
+  }
+  return true;
+}
+
+function normalizeGroqModelId(model: string): string {
+  const trimmed = String(model || '').trim();
+  if (/^groq\/(?:compound|compound-mini)$/.test(trimmed)) return trimmed;
+  return trimmed.startsWith('groq/') ? trimmed.slice('groq/'.length) : trimmed;
+}
+
+async function resolveGroqModel(requestedModel: string, apiKey: string): Promise<string> {
+  const now = Date.now();
+  if (!groqModelCatalogCache || now >= groqModelCatalogCache.expiresAt) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2_500);
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/models', {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+      });
+      if (response.ok) {
+        const data = await response.json() as { data?: Array<{ id?: string }> };
+        groqModelCatalogCache = {
+          models: new Set((data.data || []).map(item => String(item.id || '').trim()).filter(Boolean)),
+          expiresAt: now + GROQ_MODEL_CATALOG_TTL_MS,
+        };
+      }
+    } catch {
+      // Model discovery is an optimization. A catalog outage must not block chat.
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  const requested = normalizeGroqModelId(requestedModel);
+  const models = groqModelCatalogCache?.models;
+  const discoveredTextModels = models
+    ? [...models].filter(model =>
+        !/whisper|speech|tts|audio|playai|orpheus|canopylabs|guard|moderation|compound|llama-3\.1-8b-instant|llama-3\.3-70b-versatile/i.test(model)
+      )
+    : [];
+
+  const capabilityCandidates = [
+    requested,
+    // The background lane needs an independently permitted alternative when
+    // a project lists Qwen but denies inference for that particular model.
+    ...(requested === 'qwen/qwen3.8-27b' ? ['openai/gpt-oss-20b'] : []),
+    DEFAULT_GROQ_MODEL,
+    'openai/gpt-oss-20b',
+    'openai/gpt-oss-120b',
+    'qwen/qwen3.6-27b',
+    'qwen/qwen3.8-27b',
+    ...discoveredTextModels,
+  ]
+    .map(normalizeGroqModelId)
+    .filter((model, index, all) => !!model && all.indexOf(model) === index);
+
+  const candidate = capabilityCandidates.find(model =>
+    !isGroqModelBlocked(model)
+    && (!models || models.size === 0 || models.has(model))
+  );
+
+  if (!candidate) {
+    throw new Error('No permitted capability-compatible Groq model is currently available');
+  }
+  return candidate;
+}
+
+interface GroqChatCompletionResponse {
+  choices: Array<{
+    message: {
+      content: string;
+    };
+  }>;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+}
+
+/**
+ * Make direct HTTPS call to Groq API
+ * NO OpenAI SDK - pure fetch implementation
+ */
+async function callGroqAPI(request: GroqChatCompletionRequest): Promise<string> {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    throw new Error('GROQ_API_KEY environment variable is not set');
+  }
+
+  let response: Response | null = null;
+  let model = '';
+  let errorText = '';
+  const attempted = new Set<string>();
+
+  // Avoid burning the free request allowance against a long list of blocked models.
+  while (attempted.size < (request.providerPolicy === 'legalwhat' ? 1 : 2)) {
+    model = request.providerPolicy === 'legalwhat' ? request.model : await resolveGroqModel(request.model, apiKey);
+    if (attempted.has(model)) break;
+    attempted.add(model);
+
+    const { signal, providerPolicy, ...wireRequest } = request;
+    response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ...wireRequest, model }),
+      signal,
+    });
+
+    if (providerPolicy === 'legalwhat') await noteLegalProviderHeaders(AIProvider.GROQ, response.headers);
+    if (response.ok) break;
+    errorText = await response.text();
+
+    const routeLocalModelFailure =
+      (
+        response.status === 403
+        && /model_permission_blocked_(?:project|org)|model.*blocked/i.test(errorText)
+      )
+      || (
+        (response.status === 400 || response.status === 404)
+        && /model_terms_required|requires terms acceptance|accept the terms|not supported.*chat|chat.*not supported|model.*not found|unknown model/i.test(errorText)
+      );
+
+    if (routeLocalModelFailure) {
+      groqBlockedModels.set(model, Date.now() + GROQ_MODEL_BLOCK_TTL_MS);
+      continue;
+    }
+
+    break;
+  }
+
+  if (!response?.ok) {
+    const { rateLimitTracker } = await import('./rateLimitTracker');
+    const status = response?.status ?? 503;
+    const error = Object.assign(new Error(`Groq API error (${status}): ${errorText || 'no compatible permitted model responded'}`), { headers: response?.headers, status });
+    rateLimitTracker.recordGroqError(error);
+    throw error;
+  }
+
+  const data: GroqChatCompletionResponse = await response.json();
+  const text = data.choices[0]?.message?.content;
+
+  if (!text) {
+    throw new Error('Empty response from Groq');
+  }
+
+  // Track Groq success with token usage
+  const { rateLimitTracker } = await import('./rateLimitTracker');
+  const tokensUsed = data.usage?.total_tokens || 0;
+  rateLimitTracker.recordGroqSuccess(tokensUsed);
+
+  return text;
+}
+
+/**
+ * Get a Groq client interface (compatibility function)
+ * Returns an object with the same interface as before, but uses native HTTP
+ */
+export function getGroqClient(): any {
+  return {
+    chat: {
+      completions: {
+        create: async (request: GroqChatCompletionRequest) => {
+          const content = await callGroqAPI(request);
+          return {
+            choices: [{
+              message: {
+                content
+              }
+            }]
+          };
+        }
+      }
+    }
+  };
+}
+
+/**
+ * Check if Groq is available
+ */
+export function isGroqAvailable(): boolean {
+  return !!process.env.GROQ_API_KEY;
+}
+
+/**
+ * Warm and validate the live model catalog without spending inference tokens.
+ * This is best-effort readiness data; chat still retains route-local fallback.
+ */
+export async function warmGroqModelCatalog(): Promise<{ ready: boolean; model?: string; error?: string }> {
+  const apiKey = process.env.GROQ_API_KEY?.trim();
+  if (!apiKey) return { ready: false, error: 'not configured' };
+  try {
+    // Catalog checks are free of inference usage. Permissions are learned from
+    // actual user requests; an API key can list a model it cannot invoke.
+    const model = await resolveGroqModel(DEFAULT_GROQ_MODEL, apiKey);
+    return { ready: true, model };
+  } catch (error) {
+    return {
+      ready: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Helper function to estimate optimal Groq tokens based on prompt complexity.
+ * This is a simplified heuristic and can be further refined.
+ */
+function getOptimalGroqTokens(prompt: string, options: { requiresLegalAnalysis?: boolean; requiresResearch?: boolean }): number {
+  const baseTokens = 2048; // A reasonable default for most queries
+  let additionalTokens = 0;
+
+  if (options.requiresLegalAnalysis) {
+    additionalTokens += 3072; // Allocate more for complex legal analysis
+  }
+  if (options.requiresResearch) {
+    additionalTokens += 4096; // Allocate even more for in-depth research
+  }
+
+  return Math.min(baseTokens + additionalTokens, 8192); // Cap at the maximum allowed
+}
+
+/**
+ * Generate legal consultation using Groq (native HTTP implementation)
+ * Configured for legal research, legal drafting, and legal consultation
+ */
+export async function generateGroqLegalConsultation(
+  prompt: string,
+  systemPrompt?: string
+): Promise<string> {
+  // Enhanced system prompt for legal services
+  const legalSystemPrompt = systemPrompt || `You are an expert legal AI assistant specializing in:
+- Legal Research: Comprehensive analysis of statutes, case law, and regulations
+- Legal Drafting: Professional legal document creation (complaints, lawsuits, petitions, tort notices)
+- Legal Consultation: Providing thorough legal guidance on civil rights and police accountability cases
+
+CRITICAL COMMUNICATION RULE: Use plain, everyday language that anyone can understand. Avoid legal jargon and complex terms. Explain everything like you're talking to a friend who has no legal background. When you must use a legal term, immediately explain what it means in simple words.
+
+Your responses should be:
+- Written in plain English, avoiding legalese
+- Thorough and comprehensive
+- Legally accurate and well-cited
+- Easy to understand for people without legal training
+- Actionable with clear next steps
+- Compliant with jurisdictional requirements
+
+Always note that your guidance is informational and users should consult a licensed attorney.`;
+
+  try {
+    // Dynamically determine optimal token allocation
+    const optimalTokens = getOptimalGroqTokens(prompt, {
+      requiresLegalAnalysis: true,
+      requiresResearch: systemPrompt?.includes('research') || false
+    });
+
+    return await callGroqAPI({
+      model: DEFAULT_GROQ_MODEL, // Best for legal reasoning
+      messages: [
+        { role: 'system', content: legalSystemPrompt },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.3,
+      max_tokens: optimalTokens,
+    });
+  } catch (error: any) {
+    console.error('Groq API error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Generate legal document using Groq (native HTTP implementation)
+ */
+export async function generateGroqLegalDocument(
+  documentType: string,
+  context: Record<string, any>,
+  instructions: string
+): Promise<string> {
+  const contextStr = Object.entries(context)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join('\n');
+
+  const prompt = `Generate a professional ${documentType} with the following details:
+
+${contextStr}
+
+Instructions: ${instructions}
+
+Generate a complete, legally-formatted document.`;
+
+  try {
+    return await callGroqAPI({
+      model: DEFAULT_GROQ_MODEL,
+      messages: [
+        {
+          role: 'system',
+          content: `You are an expert legal document drafting assistant specializing in civil rights and police accountability cases.
+
+Your expertise includes:
+- Complaints against police officers
+- Civil rights lawsuits (42 USC §1983)
+- Petitions for officer accountability
+- Tort claim notices
+- FOIA requests
+
+Generate professional, legally-formatted documents with:
+- Proper legal structure and formatting
+- Accurate citations and references
+- Jurisdiction-specific requirements
+- Clear, professional language
+- All required sections and elements`,
+        },
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+      temperature: 0.3,
+      max_tokens: 8192,
+    });
+  } catch (error: any) {
+    console.error('Groq API error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Generate structured response using Groq (native HTTP implementation)
+ */
+export async function generateGroqStructuredResponse(
+  prompt: string,
+  systemPrompt: string
+): Promise<string> {
+  const optimalTokens = getOptimalGroqTokens(prompt, {
+    requiresLegalAnalysis: false,
+    requiresResearch: false
+  });
+
+  try {
+    return await callGroqAPI({
+      model: DEFAULT_GROQ_MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.3,
+      max_tokens: optimalTokens,
+    });
+  } catch (error: any) {
+    console.error('Groq API error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Generate JSON response using Groq (native HTTP implementation)
+ * Handles JSON parsing with auto-correction for common AI response issues
+ */
+export async function generateGroqLegalJSON(
+  prompt: string,
+  systemPrompt: string,
+  options?: {
+    requiresLegalAnalysis?: boolean;
+    requiresResearch?: boolean;
+  }
+): Promise<any> {
+  const optimalTokens = getOptimalGroqTokens(prompt, options || {});
+
+  // Enhance system prompt to ensure JSON output
+  const jsonSystemPrompt = `${systemPrompt}
+
+CRITICAL: You MUST respond with valid JSON only. Do not include any text before or after the JSON object. Your entire response must be a valid JSON object.`;
+
+  try {
+    const text = await callGroqAPI({
+      model: DEFAULT_GROQ_MODEL,
+      messages: [
+        { role: 'system', content: jsonSystemPrompt },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.3,
+      max_tokens: optimalTokens,
+    });
+
+    // Parse JSON with auto-correction
+    return parseGroqJSON(text);
+  } catch (error: any) {
+    console.error('Groq JSON API error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Safely parse JSON from Groq response with auto-correction
+ */
+function parseGroqJSON(rawText: string): any {
+  if (!rawText || !rawText.trim()) {
+    throw new Error('Empty JSON response from Groq');
+  }
+
+  // Try direct parse first
+  try {
+    return JSON.parse(rawText);
+  } catch (firstError) {
+    console.log('[Groq] Direct JSON parse failed, attempting recovery...');
+    
+    // Try to extract JSON from markdown code blocks
+    let cleanedJson = rawText.replace(/```json\n?/g, '').replace(/```/g, '').trim();
+    
+    // Try to find JSON object boundaries
+    const firstBrace = cleanedJson.indexOf('{');
+    const lastBrace = cleanedJson.lastIndexOf('}');
+    
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      cleanedJson = cleanedJson.substring(firstBrace, lastBrace + 1);
+      
+      try {
+        return JSON.parse(cleanedJson);
+      } catch (secondError) {
+        // Last attempt: try to fix unterminated strings
+        const fixedJson = cleanedJson.replace(/"([^"]*?)$/gm, '"$1"');
+        try {
+          return JSON.parse(fixedJson);
+        } catch (finalError) {
+          console.error('[Groq] All JSON parsing attempts failed');
+          throw new Error('Failed to parse JSON from Groq response');
+        }
+      }
+    }
+    
+    throw new Error('Failed to extract valid JSON from Groq response');
+  }
+}

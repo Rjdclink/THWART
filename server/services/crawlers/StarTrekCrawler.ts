@@ -1,0 +1,470 @@
+import { acquirePublicResource, isPantheonAcquisitionContextActive } from './PublicAcquisitionInfrastructure';
+/**
+ * 🚀 STAR TREK CRAWLER - Federation Explorer
+ * 
+ * Federation starship optimized for:
+ * - Warp speed jumps (cover vast territory)
+ * - Transporter beaming (instant deep URL access)
+ * - Long-range sensors (discovery)
+ * - Phasers with stun/kill settings (10 levels)
+ * - Prime Directive mode (ethical constraints)
+ * 
+ * Standalone implementation (~450 lines)
+ */
+
+// Types
+export type WarpDistance = 'near' | 'far' | 'galactic';
+export type PhaserSetting = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+
+export interface Data {
+  content: string;
+  confidence: number;
+  timestamp: number;
+  target: string;
+  metadata?: any;
+}
+
+interface RequestOptions {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: any;
+  timeout?: number;
+}
+
+// Utility function for HTTP requests
+async function executeRequest(url: string, options: RequestOptions): Promise<Response> {
+  const method = String(options.method || 'GET').toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD') throw new Error(`Pantheon crawler network method rejected: ${method}`);
+  const result = await acquirePublicResource(url, options.timeout || 30_000, undefined, undefined, {
+    method: method as 'GET' | 'HEAD',
+    headers: options.headers,
+  });
+  if (!result.ok) throw new Error(`Crawler request failed: ${result.errorType || 'network_failure'} ${result.status || ''} ${result.error || ''}`.trim());
+  return new Response(method === 'HEAD' ? null : result.content, { status: result.status || 200, headers: { 'content-type': result.contentType } });
+}
+
+// Parse HTML results
+function parseResults(html: string, target?: string): Data {
+  const discoveredCandidates = [...new Set(
+    [...html.matchAll(/href=["']([^"']+)["']/gi)]
+      .map(match => match[1])
+      .filter(value => /^https?:\/\//i.test(value)),
+  )].slice(0, 20);
+  return {
+    content: html.replace(/<[^>]*>/g, ' ').substring(0, 2000),
+    confidence: 0.8,
+    timestamp: Date.now(),
+    target: target || "",
+    metadata: { discoveredCandidates },
+  };
+}
+
+/**
+ * Star Trek Crawler - Federation Explorer
+ */
+export class StarTrekCrawler {
+  private warpSpeed: number = 5;
+  private phaserSetting: PhaserSetting = 3;
+  private primeDirective: boolean = true;
+  private lastRequestTime: number = 0;
+  private requestCount: number = 0;
+  private navigationSeeds: string[] = [
+    'https://www.usa.gov',
+    'https://data.gov',
+    'https://www.archives.gov',
+    'https://www.wikidata.org',
+    'https://www.courtlistener.com',
+  ];
+
+  /**
+   * Replace the default public navigation set with caller-supplied, authorized seeds.
+   */
+  setNavigationSeeds(seeds: string[]): void {
+    const normalized = Array.from(new Set(
+      seeds
+        .map(seed => {
+          try {
+            return new URL(seed).toString().replace(/\/$/, '');
+          } catch {
+            return '';
+          }
+        })
+        .filter(Boolean)
+    ));
+    if (normalized.length === 0) {
+      throw new Error('At least one valid http(s) navigation seed is required');
+    }
+    this.navigationSeeds = normalized;
+  }
+
+  /**
+   * Set the Prime Directive mode
+   * When enabled: Max phaser setting 5 (bounded public-web retrieval)
+   * When disabled: Higher extraction-rate settings are available
+   */
+  setPrimeDirective(enabled: boolean): void {
+    this.primeDirective = enabled;
+    if (enabled && this.phaserSetting > 5) {
+      this.phaserSetting = 5;
+    }
+  }
+
+  /**
+   * Get current Prime Directive status
+   */
+  getPrimeDirective(): boolean {
+    return this.primeDirective;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // WARP DRIVE - Jump across vast distances
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Set warp speed (affects stealth tradeoff)
+   * Speed 1-9, where higher speed = less stealth
+   */
+  setWarpSpeed(speed: number): void {
+    if (speed < 1 || speed > 9) {
+      throw new Error('Warp speed must be between 1 and 9');
+    }
+    this.warpSpeed = speed;
+  }
+
+  /**
+   * Warp jump across the configured, authorized public navigation set.
+   * Distances select deterministic offsets within that real seed list.
+   */
+  async warpJump(distance: WarpDistance): Promise<string> {
+    await this.waitForRateLimit();
+
+    const offsets: Record<WarpDistance, number> = {
+      near: 0,
+      far: 2,
+      galactic: 4,
+    };
+    const offset = offsets[distance];
+    if (offset === undefined) throw new Error('Invalid warp distance');
+    if (this.navigationSeeds.length === 0) throw new Error('No navigation seeds configured');
+
+    const index = (offset + this.requestCount) % this.navigationSeeds.length;
+    return this.navigationSeeds[index];
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TRANSPORTER - Beam directly to deep URLs
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Probe common public deep-URL patterns and succeed only when a real
+   * responsive endpoint is found.
+   */
+  async beamTo(target: string): Promise<void> {
+    await this.waitForRateLimit();
+    
+    const deepUrls = this.predictDeepUrls(target);
+    for (const candidate of deepUrls) {
+      try {
+        const response = await executeRequest(candidate, {
+          method: 'HEAD',
+          timeout: 5000,
+        });
+        if (response.ok) {
+          console.log(`✅ Beamed to: ${candidate}`);
+          return;
+        }
+      } catch {
+        // Candidate failure is local; try the next predicted public path.
+      }
+    }
+    throw new Error('Transport failed - no responsive predicted deep URL');
+  }
+
+  /**
+   * Emergency beam out (quick escape)
+   */
+  async emergencyBeamOut(): Promise<void> {
+    console.log('⚡ EMERGENCY BEAM OUT - Escaping hostile environment');
+    // Reset request counters and rate limiting
+    this.lastRequestTime = 0;
+    this.requestCount = 0;
+  }
+
+  private predictDeepUrls(baseUrl: string): string[] {
+    const patterns = [
+      '/about',
+      '/about-us',
+      '/team',
+      '/contact',
+      '/contact-us',
+      '/services',
+      '/products',
+      '/pricing',
+      '/features',
+      '/documentation',
+      '/docs',
+      '/api',
+      '/blog',
+      '/news',
+      '/careers',
+      '/jobs'
+    ];
+    
+    return patterns.map(p => `${baseUrl}${p}`);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SENSORS - Discovery and reconnaissance
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Long-range sensors scan for new targets
+   */
+  async longRangeScan(): Promise<string[]> {
+    await this.waitForRateLimit();
+    const scanRange = Math.max(1, Math.min(this.navigationSeeds.length, this.warpSpeed));
+    return this.navigationSeeds.slice(0, scanRange);
+  }
+
+  /**
+   * Detect life signs (check if target is responsive)
+   */
+  async detectLifeSigns(target: string): Promise<boolean> {
+    await this.waitForRateLimit();
+    
+    try {
+      const response = await executeRequest(target, {
+        method: 'HEAD',
+        timeout: 5000
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PHASERS - Data extraction with variable intensity
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Set phaser setting (1-10)
+   * Settings 1-5: Stun (gentle extraction)
+   * Settings 6-10: Kill (aggressive extraction)
+   * 
+   * Rate limits:
+   * 1-2: 1-5 req/min (ultra gentle)
+   * 3-4: 10-20 req/min (normal)
+   * 5: 40 req/min (max stun)
+   * 6-7: 60-120 req/min (light kill)
+   * 8-9: 240-500 req/min (heavy kill)
+   * 10: 10000 req/min (disintegrate)
+   */
+  async setPhaserSetting(setting: PhaserSetting): Promise<void> {
+    if (this.primeDirective && setting > 5) {
+      throw new Error('Prime Directive violation: Cannot use kill settings while Prime Directive is enabled');
+    }
+    this.phaserSetting = setting;
+  }
+
+  /**
+   * Fire phaser at target to extract data
+   */
+  async firePhaser(target: string): Promise<Data> {
+    await this.waitForRateLimit();
+    
+    try {
+      const response = await executeRequest(target, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'LegalWhat-Pantheon-StarTrek/1.0 public-record research',
+        },
+        timeout: this.getTimeoutForSetting()
+      });
+      
+      if (!response.ok) {
+        return {
+          content: '',
+          confidence: 0,
+          timestamp: Date.now(),
+          target,
+          metadata: {
+            error: `HTTP ${response.status}`,
+            status: response.status,
+          },
+        };
+      }
+
+      const html = await response.text();
+      const data = parseResults(html);
+      data.target = target;
+      data.metadata = {
+        ...(data.metadata || {}),
+        phaserSetting: this.phaserSetting,
+        warpSpeed: this.warpSpeed,
+        primeDirective: this.primeDirective
+      };
+      
+      this.requestCount++;
+      return data;
+    } catch (error) {
+      return {
+        content: '',
+        confidence: 0,
+        timestamp: Date.now(),
+        target,
+        metadata: { error: error instanceof Error ? error.message : 'Phaser missed target' }
+      };
+    }
+  }
+
+  /**
+   * Warp to target (alias for firePhaser with warp metadata)
+   */
+  async warpTo(target: string): Promise<Data> {
+    const data = await this.firePhaser(target);
+    if (data.metadata) {
+      data.metadata.warpFactor = this.warpSpeed;
+    }
+    return data;
+  }
+
+  /**
+   * Get requests per minute for current phaser setting
+   */
+  private getRequestsPerMinute(): number {
+    const settings: Record<PhaserSetting, number> = {
+      1: 3,
+      2: 5,
+      3: 10,
+      4: 20,
+      5: 40,
+      6: 60,
+      7: 120,
+      8: 240,
+      9: 500,
+      10: 10000
+    };
+    return settings[this.phaserSetting];
+  }
+
+  /**
+   * Get timeout for current phaser setting (higher = longer timeout)
+   */
+  private getTimeoutForSetting(): number {
+    const baseTimeout = 30000;
+    if (this.phaserSetting >= 8) {
+      return 5000; // Aggressive settings = shorter timeout
+    }
+    if (this.phaserSetting <= 2) {
+      return 60000; // Gentle settings = longer timeout
+    }
+    return baseTimeout;
+  }
+
+  /**
+   * Wait for rate limit based on phaser setting
+   */
+  private async waitForRateLimit(): Promise<void> {
+    // Canonical Pantheon acquisition owns the shared per-host governor,
+    // deadlines, and abort signal. A second crawler-local sleep was neither
+    // cancellable nor host-aware and could consume an entire route budget.
+    if (isPantheonAcquisitionContextActive()) {
+      this.lastRequestTime = Date.now();
+      return;
+    }
+    const requestsPerMinute = this.getRequestsPerMinute();
+    const minDelayMs = 60000 / requestsPerMinute;
+    
+    const now = Date.now();
+    const timeSinceLastRequest = now - this.lastRequestTime;
+    
+    if (timeSinceLastRequest < minDelayMs) {
+      const waitTime = minDelayMs - timeSinceLastRequest;
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
+    
+    this.lastRequestTime = Date.now();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // MISSIONS - High-level operations
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Explore a sector (discover and extract data from multiple targets)
+   */
+  async explore(sector: string): Promise<Data[]> {
+    const results: Data[] = [];
+    
+    // First, discover targets in the sector
+    const targets = await this.longRangeScan();
+    
+    // Fire phasers at each target
+    for (const target of targets.slice(0, 5)) { // Limit to 5 for reasonable execution
+      const lifeSignsDetected = await this.detectLifeSigns(target);
+      
+      if (lifeSignsDetected) {
+        try {
+          const data = await this.firePhaser(target);
+          results.push(data);
+        } catch (error) {
+          // Continue to next target
+        }
+      }
+    }
+    
+    return results;
+  }
+
+  /**
+   * Surgical strike on a specific target (precision extraction)
+   */
+  async surgicalStrike(target: string): Promise<Data> {
+    // Save current settings
+    const originalSetting = this.phaserSetting;
+    const originalPrimeDirective = this.primeDirective;
+    
+    try {
+      // Surgical strikes use setting 5 (max stun) for precision
+      this.primeDirective = false; // Allow setting change
+      await this.setPhaserSetting(5);
+      this.primeDirective = originalPrimeDirective; // Restore
+      
+      // First, detect life signs
+      const alive = await this.detectLifeSigns(target);
+      
+      if (!alive) {
+        throw new Error('No life signs detected - target unreachable');
+      }
+      
+      // Try to beam directly to deep URLs first
+      try {
+        await this.beamTo(target);
+      } catch {
+        // Transport failed, continue with phaser
+      }
+      
+      // Fire phaser
+      return await this.firePhaser(target);
+    } finally {
+      // Restore original settings
+      this.primeDirective = false;
+      await this.setPhaserSetting(originalSetting);
+      this.primeDirective = originalPrimeDirective;
+    }
+  }
+
+  /**
+   * Get current ship status
+   */
+  getStatus() {
+    return {
+      warpSpeed: this.warpSpeed,
+      phaserSetting: this.phaserSetting,
+      primeDirective: this.primeDirective,
+      requestCount: this.requestCount,
+      lastRequestTime: this.lastRequestTime
+    };
+  }
+}
